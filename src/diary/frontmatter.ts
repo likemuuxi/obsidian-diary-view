@@ -18,7 +18,7 @@ export function splitFrontmatter(content: string): { frontmatter: string; body: 
 export const DAILY_QUOTE_FRONTMATTER_KEY = "daily-quote";
 
 const DAILY_WEATHER_FRONTMATTER_KEY = "daily-weather";
-const DAILY_IMAGE_FRONTMATTER_KEY = "daily-image";
+export const DEFAULT_DAILY_IMAGE_FRONTMATTER_KEY = "daily-image";
 
 export function readFrontmatterString(frontmatter: unknown, key: string, includeEmpty = false): string | null {
 	if (!frontmatter || typeof frontmatter !== "object") {
@@ -60,6 +60,6 @@ export function readWeatherIcon(frontmatter: unknown): string | null {
 	return readFrontmatterString(frontmatter, DAILY_WEATHER_FRONTMATTER_KEY);
 }
 
-export function readArtworkImage(frontmatter: unknown): string | null {
-	return readFrontmatterString(frontmatter, DAILY_IMAGE_FRONTMATTER_KEY);
+export function readArtworkImage(frontmatter: unknown, key: string = DEFAULT_DAILY_IMAGE_FRONTMATTER_KEY): string | null {
+	return readFrontmatterString(frontmatter, key);
 }

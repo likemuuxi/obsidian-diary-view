@@ -3,10 +3,12 @@ import type DiaryViewPlugin from "./main";
 
 export interface DiaryViewSettings {
 	dailyQuoteApiUrl: string;
+	dailyImageFrontmatterKey: string;
 }
 
 export const DEFAULT_SETTINGS: DiaryViewSettings = {
 	dailyQuoteApiUrl: "",
+	dailyImageFrontmatterKey: "daily-image",
 };
 
 export class DiaryViewSettingTab extends PluginSettingTab {
@@ -32,6 +34,20 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.dailyQuoteApiUrl)
 					.onChange(async (value) => {
 						this.plugin.settings.dailyQuoteApiUrl = value.trim();
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName("Image frontmatter key")
+			.setDesc("Frontmatter property used to read the diary image URL or path.")
+			.addText((text) => {
+				text
+					.setPlaceholder("daily-image")
+					.setValue(this.plugin.settings.dailyImageFrontmatterKey)
+					.onChange(async (value) => {
+						const nextValue = value.trim() || DEFAULT_SETTINGS.dailyImageFrontmatterKey;
+						this.plugin.settings.dailyImageFrontmatterKey = nextValue;
 						await this.plugin.saveSettings();
 					});
 			});

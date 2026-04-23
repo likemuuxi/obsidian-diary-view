@@ -2,6 +2,7 @@ import { ItemView, MarkdownRenderer, moment, normalizePath, requestUrl, setIcon,
 import type DiaryViewPlugin from "../main";
 import {
 	DAILY_QUOTE_FRONTMATTER_KEY,
+	DEFAULT_DAILY_IMAGE_FRONTMATTER_KEY,
 	readArtworkImage,
 	readDailyQuote,
 	readWeatherIcon,
@@ -143,6 +144,11 @@ export class DiaryView extends ItemView {
 		const leftDesktopEl = leftBaseEl.createDiv({ cls: "diary-desktop-only" });
 		this.renderLeftPage(leftDesktopEl, currentDate, currentContent, calendarDates);
 
+		const mobileSpineEl = pagesWrapEl.createDiv({ cls: "diary-mobile-spine" });
+		[-92, -46, 0, 46, 92].forEach((offset) => {
+			this.renderMobileSpineRing(mobileSpineEl, offset);
+		});
+
 		const rightBaseEl = pagesWrapEl.createDiv({ cls: "diary-base-page is-right" });
 		await this.renderRightPage(rightBaseEl, currentContent);
 
@@ -193,8 +199,8 @@ export class DiaryView extends ItemView {
 		pagesWrapEl.createDiv({ cls: "diary-spine-shadow is-right" });
 		pagesWrapEl.createDiv({ cls: "diary-spine-crease" });
 
-		["12%", "24%", "36%", "48%", "60%", "72%", "84%"].forEach((top) => {
-			this.renderSpineRing(pagesWrapEl, top);
+		["12%", "24%", "36%", "48%", "60%", "72%", "84%"].forEach((top, index) => {
+			this.renderSpineRing(pagesWrapEl, top, index);
 		});
 	}
 
@@ -432,9 +438,25 @@ export class DiaryView extends ItemView {
 		return withoutHeading.trim();
 	}
 
-	private renderSpineRing(parentEl: HTMLElement, top: string): void {
-		const ringEl = parentEl.createDiv({ cls: "diary-spine-ring" });
+	private renderSpineRing(parentEl: HTMLElement, top: string, index: number): void {
+		const ringEl = parentEl.createDiv({ cls: `diary-spine-ring is-ring-${index + 1}` });
 		ringEl.style.top = top;
+		ringEl.innerHTML = `
+			<svg width="40" height="16" viewBox="0 0 40 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+				<circle cx="8" cy="8" r="3.5" class="diary-ring-hole" />
+				<circle cx="8" cy="8" r="2.5" class="diary-ring-core" />
+				<circle cx="32" cy="8" r="3.5" class="diary-ring-hole" />
+				<circle cx="32" cy="8" r="2.5" class="diary-ring-core" />
+				<path d="M 6 8.5 C 14 1, 26 1, 34 8.5" class="diary-ring-metal diary-ring-metal-main" />
+				<path d="M 6 8 C 14 1, 26 1, 34 8" class="diary-ring-metal diary-ring-metal-highlight" />
+				<path d="M 6 9 C 14 2, 26 2, 34 9" class="diary-ring-metal diary-ring-metal-shadow" />
+			</svg>
+		`;
+	}
+
+	private renderMobileSpineRing(parentEl: HTMLElement, offset: number): void {
+		const ringEl = parentEl.createDiv({ cls: "diary-mobile-spine-ring" });
+		ringEl.style.setProperty("--diary-mobile-ring-offset", `${offset}px`);
 		ringEl.innerHTML = `
 			<svg width="40" height="16" viewBox="0 0 40 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
 				<circle cx="8" cy="8" r="3.5" class="diary-ring-hole" />
@@ -525,9 +547,10 @@ export class DiaryView extends ItemView {
 		const wordCount = this.countWords(markdown);
 		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
 		const dailyQuote = readDailyQuote(frontmatter) ?? await this.fetchAndCacheDailyQuote(file);
+		const imageFrontmatterKey = this.plugin.settings.dailyImageFrontmatterKey || DEFAULT_DAILY_IMAGE_FRONTMATTER_KEY;
 		return {
 			imageCaption: file.basename,
-			artworkImage: readArtworkImage(frontmatter),
+			artworkImage: readArtworkImage(frontmatter, imageFrontmatterKey),
 			promptTitle: "Daily quote",
 			promptText: dailyQuote ?? "",
 			promptPlaceholder: "Write a sentence for today...",
