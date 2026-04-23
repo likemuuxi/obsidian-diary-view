@@ -143,7 +143,7 @@ export class DiaryView extends ItemView {
 		const leftDesktopEl = leftBaseEl.createDiv({ cls: "diary-desktop-only" });
 		this.renderLeftPage(leftDesktopEl, currentDate, currentContent, calendarDates);
 
-		const rightBaseEl = pagesWrapEl.createDiv({ cls: "diary-base-page is-right diary-desktop-only" });
+		const rightBaseEl = pagesWrapEl.createDiv({ cls: "diary-base-page is-right" });
 		await this.renderRightPage(rightBaseEl, currentContent);
 
 		if (shouldAnimate) {
@@ -460,6 +460,15 @@ export class DiaryView extends ItemView {
 			return;
 		}
 
+		if (!this.shouldUsePageFlip()) {
+			this.previousDateId = this.activeDateId;
+			this.activeDateId = nextDateId;
+			this.pendingDateId = null;
+			this.isAnimating = false;
+			void this.render();
+			return;
+		}
+
 		this.direction = nextIndex > currentIndex ? "next" : "prev";
 		this.previousDateId = this.activeDateId;
 		if (this.direction === "next") {
@@ -471,6 +480,10 @@ export class DiaryView extends ItemView {
 		this.isAnimating = true;
 
 		void this.render();
+	}
+
+	private shouldUsePageFlip(): boolean {
+		return window.matchMedia("(min-width: 960px)").matches;
 	}
 
 	private async openDailyNote(path: string): Promise<void> {
