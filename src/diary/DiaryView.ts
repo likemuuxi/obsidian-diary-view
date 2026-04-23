@@ -424,10 +424,10 @@ export class DiaryView extends ItemView {
 			return value;
 		}
 
-		return embeddedMatch[1]
-			.split("|")[0]
-			.split("#")[0]
-			.trim();
+		const [, embeddedPath = value] = embeddedMatch;
+		const withoutAlias = embeddedPath.split("|")[0] ?? embeddedPath;
+		const withoutHeading = withoutAlias.split("#")[0] ?? withoutAlias;
+		return withoutHeading.trim();
 	}
 
 	private renderSpineRing(parentEl: HTMLElement, top: string): void {
