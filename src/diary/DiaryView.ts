@@ -1,4 +1,4 @@
-import { ItemView, MarkdownRenderer, normalizePath, requestUrl, setIcon, TFile, WorkspaceLeaf } from "obsidian";
+import { ItemView, MarkdownRenderer, moment, normalizePath, requestUrl, setIcon, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import type DiaryViewPlugin from "../main";
 import {
 	DAILY_QUOTE_FRONTMATTER_KEY,
@@ -14,6 +14,7 @@ interface DiaryDateItem {
 	label: string | null;
 	date: Date;
 	path: string;
+	hasNote: boolean;
 	day: string;
 	month: string;
 	dayOfWeek: string;
@@ -58,7 +59,7 @@ export class DiaryView extends ItemView {
 		super(leaf);
 		this.plugin = plugin;
 		this.dates = this.buildDateItems();
-		this.activeDateId = this.dates[0]?.id ?? this.formatDateId(new Date());
+		this.activeDateId = this.formatDateId(new Date());
 		this.previousDateId = this.activeDateId;
 	}
 
@@ -94,7 +95,7 @@ export class DiaryView extends ItemView {
 	async refresh(): Promise<void> {
 		this.dates = this.buildDateItems();
 		if (!this.dates.some((date) => date.id === this.activeDateId)) {
-			this.activeDateId = this.dates[0]?.id ?? this.formatDateId(new Date());
+			this.activeDateId = this.formatDateId(new Date());
 			this.previousDateId = this.activeDateId;
 			this.pendingDateId = null;
 			this.isAnimating = false;
@@ -256,13 +257,14 @@ export class DiaryView extends ItemView {
 		const calendarEl = pageEl.createDiv({ cls: "diary-calendar" });
 		calendarDates.forEach((date) => {
 			const itemEl = calendarEl.createDiv({
-				cls: `diary-calendar-item${date.id === this.activeDateId ? " is-active" : ""}`,
+				cls: `diary-calendar-item${date.id === this.activeDateId ? " is-active" : ""}${date.hasNote ? " has-note" : ""}`,
 			});
 			itemEl.addEventListener("click", () => {
 				this.handleDateChange(date.id);
 			});
 			itemEl.createSpan({ cls: "diary-calendar-dow", text: date.dayOfWeek });
 			itemEl.createSpan({ cls: "diary-calendar-number", text: date.day });
+			itemEl.createSpan({ cls: "diary-calendar-note-dot", attr: { "aria-hidden": "true" } });
 		});
 
 		const streakEl = pageEl.createDiv({ cls: "diary-streak" });
@@ -453,6 +455,11 @@ export class DiaryView extends ItemView {
 
 		const currentIndex = this.dates.findIndex((date) => date.id === this.activeDateId);
 		const nextIndex = this.dates.findIndex((date) => date.id === nextDateId);
+		const nextDate = this.dates[nextIndex];
+		if (!nextDate) {
+			return;
+		}
+
 		this.direction = nextIndex > currentIndex ? "next" : "prev";
 		this.previousDateId = this.activeDateId;
 		if (this.direction === "next") {
@@ -686,17 +693,19 @@ export class DiaryView extends ItemView {
 		return weatherIconByValue[normalized] ?? value.trim();
 	}
 
-	private buildDateItems(): DiaryDateItem[] {
-		const today = new Date();
-		today.setHours(0, 0, 0, 0);
+	private buildDateItems(centerDate = new Date()): DiaryDateItem[] {
+		const center = new Date(centerDate);
+		center.setHours(0, 0, 0, 0);
 		return Array.from({ length: 7 }, (_, index) => {
-			const date = new Date(today);
-			date.setDate(today.getDate() - index);
+			const date = new Date(center);
+			date.setDate(center.getDate() + index - 3);
+			const path = this.getDailyNotePath(date);
 			return {
 				id: this.formatDateId(date),
-				label: index === 0 ? "Today" : index === 1 ? "Yesterday" : this.formatDatePart(date, "shortWeekday"),
+				label: this.getRelativeDateLabel(date),
 				date,
-				path: this.getDailyNotePath(date),
+				path,
+				hasNote: this.app.vault.getAbstractFileByPath(path) instanceof TFile,
 				day: this.formatDatePart(date, "day"),
 				month: this.formatDatePart(date, "shortMonth"),
 				dayOfWeek: this.formatDatePart(date, "shortWeekday"),
@@ -708,23 +717,69 @@ export class DiaryView extends ItemView {
 
 	private getDailyNotePath(date: Date): string {
 		const folder = this.plugin.getDailyNotesFolder();
-		const format = this.plugin.dailyNotesConfig?.format ?? "YYYY-MM-DD";
-		const fileName = this.formatDateByPattern(date, format);
-		return normalizePath(folder ? `${folder}/${fileName}.md` : `${fileName}.md`);
+		const fileName = this.formatDateByPattern(date, this.plugin.getDailyNotesDateFormat());
+		const expectedPath = normalizePath(folder ? `${folder}/${fileName}.md` : `${fileName}.md`);
+		return this.findExistingDailyNotePath(date, expectedPath) ?? expectedPath;
 	}
 
 	private formatDateByPattern(date: Date, pattern: string): string {
-		const year = String(date.getFullYear());
-		const month = String(date.getMonth() + 1).padStart(2, "0");
-		const day = String(date.getDate()).padStart(2, "0");
-		return (pattern || "YYYY-MM-DD")
-			.replace(/YYYY/g, year)
-			.replace(/MM/g, month)
-			.replace(/DD/g, day);
+		return moment(date).format(pattern);
+	}
+
+	private findExistingDailyNotePath(date: Date, expectedPath: string): string | null {
+		if (this.app.vault.getAbstractFileByPath(expectedPath) instanceof TFile) {
+			return expectedPath;
+		}
+
+		const folderPath = this.plugin.getDailyNotesFolder();
+		const folder = folderPath
+			? this.app.vault.getAbstractFileByPath(folderPath)
+			: null;
+		const files = folder instanceof TFolder
+			? folder.children.filter((child): child is TFile => child instanceof TFile && child.extension === "md")
+			: this.app.vault.getMarkdownFiles().filter((file) => !file.path.includes("/"));
+		const datePrefix = moment(date).format("YYYY-MM-DD");
+		const matchingFile = files.find((file) => file.basename === datePrefix || file.basename.startsWith(`${datePrefix} `));
+
+		return matchingFile?.path ?? null;
 	}
 
 	private formatDateId(date: Date): string {
-		return this.formatDateByPattern(date, "YYYY-MM-DD");
+		const day = new Date(date);
+		day.setHours(0, 0, 0, 0);
+		return String(day.getTime());
+	}
+
+	private getRelativeDateLabel(date: Date): string {
+		const target = new Date(date);
+		target.setHours(0, 0, 0, 0);
+		const today = new Date();
+		today.setHours(0, 0, 0, 0);
+		const dayOffset = Math.round((target.getTime() - today.getTime()) / 86_400_000);
+		if (dayOffset === 0) {
+			return "Today";
+		}
+		if (dayOffset === -1) {
+			return "Yesterday";
+		}
+		if (dayOffset === 1) {
+			return "Tomorrow";
+		}
+		return this.formatDatePart(date, "shortWeekday");
+	}
+
+	private getDateFromId(id: string): Date {
+		const dateFromItems = this.dates.find((date) => date.id === id)?.date;
+		if (dateFromItems) {
+			return dateFromItems;
+		}
+
+		const timestamp = Number(id);
+		if (Number.isFinite(timestamp)) {
+			return new Date(timestamp);
+		}
+
+		return new Date();
 	}
 
 	private formatDatePart(date: Date, part: "day" | "shortMonth" | "shortWeekday" | "longWeekday" | "year"): string {

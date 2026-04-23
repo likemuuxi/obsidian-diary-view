@@ -3,6 +3,8 @@ import { DiaryView } from "./diary/DiaryView";
 import { DEFAULT_SETTINGS, DiaryViewSettingTab, type DiaryViewSettings } from "./settings";
 import { VIEW_TYPE_DIARY, type DailyNotesConfig } from "./types";
 
+const DEFAULT_DAILY_NOTE_FORMAT = "YYYY-MM-DD";
+
 export default class DiaryViewPlugin extends Plugin {
 	settings: DiaryViewSettings = { ...DEFAULT_SETTINGS };
 	dailyNotesConfig: DailyNotesConfig | null = null;
@@ -82,13 +84,12 @@ export default class DiaryViewPlugin extends Plugin {
 	}
 
 	async loadDailyNotesConfig(): Promise<void> {
-		const configPath = normalizePath(`${this.app.vault.configDir}/daily-notes.json`);
 		try {
-			const raw = await this.app.vault.adapter.read(configPath);
+			const raw = await this.app.vault.adapter.read(this.getDailyNotesConfigPath());
 			const parsed = JSON.parse(raw) as Partial<DailyNotesConfig>;
 			this.dailyNotesConfig = {
 				folder: (parsed.folder ?? "").trim(),
-				format: (parsed.format ?? "YYYY-MM-DD").trim(),
+				format: (parsed.format ?? DEFAULT_DAILY_NOTE_FORMAT).trim(),
 				template: parsed.template,
 			};
 		} catch (error) {
@@ -99,6 +100,14 @@ export default class DiaryViewPlugin extends Plugin {
 
 	getDailyNotesFolder(): string {
 		return this.dailyNotesConfig?.folder ?? "";
+	}
+
+	getDailyNotesDateFormat(): string {
+		return this.dailyNotesConfig?.format || DEFAULT_DAILY_NOTE_FORMAT;
+	}
+
+	private getDailyNotesConfigPath(): string {
+		return normalizePath(`${this.app.vault.configDir}/daily-notes.json`);
 	}
 
 	private handleVaultChange(file: unknown): void {

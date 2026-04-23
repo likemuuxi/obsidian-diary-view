@@ -448,7 +448,7 @@
 	display: flex;
 	flex-direction: column;
 	align-items: center;
-	gap: 10px;
+	gap: 7px;
 	cursor: pointer;
 }
 
@@ -480,6 +480,23 @@
 	color: #ffffff;
 	box-shadow: 0 4px 10px rgba(96, 165, 250, 0.4);
 	transform: scale(1.1);
+}
+
+.diary-calendar-note-dot {
+	width: 5px;
+	height: 5px;
+	border-radius: 999px;
+	background: transparent;
+	transition: background-color 180ms ease, transform 180ms ease;
+}
+
+.diary-calendar-item.has-note .diary-calendar-note-dot {
+	background: color-mix(in srgb, var(--diary-blue) 72%, var(--diary-muted));
+}
+
+.diary-calendar-item.is-active.has-note .diary-calendar-note-dot {
+	background: var(--diary-blue);
+	transform: scale(1.15);
 }
 
 .diary-streak {
