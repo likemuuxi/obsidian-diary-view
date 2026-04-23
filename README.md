@@ -96,7 +96,3 @@ This plugin's notebook mood, diary-first interaction model, and page-turning pre
 - Dear Diary demo: https://dear-diary-three.vercel.app/
 
 Diary View is an Obsidian plugin built around local daily notes and vault frontmatter. It does not depend on Dear Diary at runtime.
-
-## Privacy
-
-Diary View stores diary data in your own vault. It does not collect telemetry. If you configure a Daily quote API, Obsidian will request that URL so the returned quote can be cached in the active daily note's frontmatter.
