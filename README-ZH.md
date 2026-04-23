@@ -1,6 +1,10 @@
+中文 | [English](https://github.com/likemuuxi/obsidian-diary-view/blob/master/README.md)
+
 # Diary View
 
 Diary View 是一款 Obsidian 社区插件，可以把你的每日笔记呈现为一本翻页日记。它希望提供一种更安静、更有仪式感的阅读和书写体验：最近的每日笔记会以书页形式展示，当前笔记可以直接预览或编辑，诸如每日一语、天气图标这类小信息也会保存在笔记自己的 frontmatter 中。
+
+<img width="1671" height="1274" alt="image" src="https://github.com/user-attachments/assets/8cd71ded-3ac8-45f6-b1b0-e2b811441fe1" />
 
 ## 功能
 
