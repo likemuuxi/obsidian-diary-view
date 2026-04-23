@@ -1,99 +1,136 @@
-import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
-import {DEFAULT_SETTINGS, MyPluginSettings, SampleSettingTab} from "./settings";
+import { MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf, normalizePath } from "obsidian";
+import { DiaryView } from "./diary/DiaryView";
+import { DEFAULT_SETTINGS, DiaryViewSettingTab, type DiaryViewSettings } from "./settings";
+import { VIEW_TYPE_DIARY, type DailyNotesConfig } from "./types";
 
-// Remember to rename these classes and interfaces!
+export default class DiaryViewPlugin extends Plugin {
+	settings: DiaryViewSettings = { ...DEFAULT_SETTINGS };
+	dailyNotesConfig: DailyNotesConfig | null = null;
+	private suppressedVaultRefreshUntil = new Map<string, number>();
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
-
-	async onload() {
+	async onload(): Promise<void> {
 		await this.loadSettings();
+		await this.loadDailyNotesConfig();
 
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
+		this.registerView(
+			VIEW_TYPE_DIARY,
+			(leaf) => new DiaryView(leaf, this),
+		);
+
+		this.addSettingTab(new DiaryViewSettingTab(this.app, this));
+
+		this.addRibbonIcon("book-open-text", "Open diary view", () => {
+			void this.activateDiaryView();
 		});
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
-
-		// This adds a simple command that can be triggered anywhere
 		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
+			id: "open-diary-view",
+			name: "Open diary view",
 			callback: () => {
-				new SampleModal(this.app).open();
-			}
+				void this.activateDiaryView();
+			},
 		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				editor.replaceSelection('Sample editor command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
 
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
+		this.registerEvent(this.app.vault.on("create", (file) => this.handleVaultChange(file)));
+		this.registerEvent(this.app.vault.on("modify", (file) => this.handleVaultChange(file)));
+		this.registerEvent(this.app.vault.on("delete", (file) => this.handleVaultChange(file)));
+		this.registerEvent(this.app.vault.on("rename", (file) => this.handleVaultChange(file)));
+	}
+
+	async onunload(): Promise<void> {
+		const diaryLeaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_DIARY);
+		for (const leaf of diaryLeaves) {
+			await leaf.setViewState({ type: "empty" });
+		}
+	}
+
+	async activateDiaryView(leaf?: WorkspaceLeaf): Promise<void> {
+		const targetLeaf = leaf ?? this.app.workspace.getLeaf(false);
+		if (!targetLeaf) {
+			new Notice("No workspace leaf available.");
+			return;
+		}
+
+		await targetLeaf.setViewState({
+			type: VIEW_TYPE_DIARY,
+			active: true,
+		});
+		this.app.workspace.revealLeaf(targetLeaf);
+	}
+
+	async refreshAllDiaryViews(): Promise<void> {
+		const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_DIARY);
+		await Promise.all(
+			leaves.map(async (leaf) => {
+				if (leaf.view instanceof DiaryView) {
+					await leaf.view.refresh();
 				}
-				return false;
-			}
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			new Notice("Click");
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-
+			}),
+		);
 	}
 
-	onunload() {
+	async loadSettings(): Promise<void> {
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 	}
 
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<MyPluginSettings>);
-	}
-
-	async saveSettings() {
+	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
 	}
-}
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
+	suppressVaultRefresh(path: string, durationMs = 400): void {
+		this.suppressedVaultRefreshUntil.set(path, Date.now() + durationMs);
 	}
 
-	onOpen() {
-		let {contentEl} = this;
-		contentEl.setText('Woah!');
+	async loadDailyNotesConfig(): Promise<void> {
+		const configPath = normalizePath(`${this.app.vault.configDir}/daily-notes.json`);
+		try {
+			const raw = await this.app.vault.adapter.read(configPath);
+			const parsed = JSON.parse(raw) as Partial<DailyNotesConfig>;
+			this.dailyNotesConfig = {
+				folder: (parsed.folder ?? "").trim(),
+				format: (parsed.format ?? "YYYY-MM-DD").trim(),
+				template: parsed.template,
+			};
+		} catch (error) {
+			this.dailyNotesConfig = null;
+			console.error("Failed to read daily-notes config", error);
+		}
 	}
 
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
+	getDailyNotesFolder(): string {
+		return this.dailyNotesConfig?.folder ?? "";
+	}
+
+	private handleVaultChange(file: unknown): void {
+		if (!(file instanceof TFile) || file.extension !== "md") {
+			return;
+		}
+
+		const suppressedUntil = this.suppressedVaultRefreshUntil.get(file.path);
+		if (suppressedUntil && suppressedUntil > Date.now()) {
+			this.suppressedVaultRefreshUntil.delete(file.path);
+			return;
+		}
+
+		if (suppressedUntil) {
+			this.suppressedVaultRefreshUntil.delete(file.path);
+		}
+
+		void this.refreshAllDiaryViews();
+	}
+
+	async openSourceFile(path: string): Promise<void> {
+		const file = this.app.vault.getAbstractFileByPath(path);
+		if (!(file instanceof TFile)) {
+			new Notice("Source file no longer exists.");
+			return;
+		}
+
+		const leaf = this.app.workspace.getLeaf(false);
+		if (leaf?.view instanceof MarkdownView && leaf.view.file?.path === path) {
+			return;
+		}
+
+		await leaf.openFile(file);
 	}
 }

@@ -1,90 +1,98 @@
-# Obsidian Sample Plugin
+# Diary View
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+Diary View is an Obsidian community plugin that turns your daily notes into a notebook-style diary view. It focuses on a calm reading and writing experience: recent daily notes are shown as pages, the current note can be previewed or edited in place, and small details such as a daily quote and weather icon can be stored directly in each note's frontmatter.
 
-This project uses TypeScript to provide type checking and documentation.
-The repo depends on the latest plugin API (obsidian.d.ts) in TypeScript Definition format, which contains TSDoc comments describing what it does.
+## Features
 
-This sample plugin demonstrates some of the basic functionality the plugin API can do.
-- Adds a ribbon icon, which shows a Notice when clicked.
-- Adds a command "Open modal (simple)" which opens a Modal.
-- Adds a plugin setting tab to the settings page.
-- Registers a global click event and output 'click' to the console.
-- Registers a global interval which logs 'setInterval' to the console.
+- Open a dedicated diary view from the ribbon icon or the `Open diary view` command.
+- Browse the latest seven daily notes with a page-like layout and flip animation.
+- Preview rendered Markdown or switch to editing without leaving the diary view.
+- Edit the prompt text at the top of the right page. The text is saved to frontmatter as `daily-quote`.
+- Optionally fetch a daily quote from a user-configured API. The plugin requests it only when a note does not already have `daily-quote`, then caches it in frontmatter.
+- Customize the weather icon for a note from frontmatter with `daily-weather`.
+- Replace the default artwork with a note-specific image from frontmatter with `daily-image`.
+- Preserve daily note frontmatter while editing the body content.
 
-## First time developing plugins?
+## Frontmatter
 
-Quick starting guide for new plugin devs:
+Diary View reads and writes a few optional frontmatter fields in your daily notes.
 
-- Check if [someone already developed a plugin for what you want](https://obsidian.md/plugins)! There might be an existing plugin similar enough that you can partner up with.
-- Make a copy of this repo as a template with the "Use this template" button (login to GitHub if you don't see it).
-- Clone your repo to a local development folder. For convenience, you can place this folder in your `.obsidian/plugins/your-plugin-name` folder.
-- Install NodeJS, then run `npm i` in the command line under your repo folder.
-- Run `npm run dev` to compile your plugin from `main.ts` to `main.js`.
-- Make changes to `main.ts` (or create new `.ts` files). Those changes should be automatically compiled into `main.js`.
-- Reload Obsidian to load the new version of your plugin.
-- Enable plugin in settings window.
-- For updates to the Obsidian API run `npm update` in the command line under your repo folder.
-
-## Releasing new releases
-
-- Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
-- Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
-- Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
-- Upload the files `manifest.json`, `main.js`, `styles.css` as binary attachments. Note: The manifest.json file must be in two places, first the root path of your repository and also in the release.
-- Publish the release.
-
-> You can simplify the version bump process by running `npm version patch`, `npm version minor` or `npm version major` after updating `minAppVersion` manually in `manifest.json`.
-> The command will bump version in `manifest.json` and `package.json`, and add the entry for the new version to `versions.json`
-
-## Adding your plugin to the community plugin list
-
-- Check the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines).
-- Publish an initial version.
-- Make sure you have a `README.md` file in the root of your repo.
-- Make a pull request at https://github.com/obsidianmd/obsidian-releases to add your plugin.
-
-## How to use
-
-- Clone this repo.
-- Make sure your NodeJS is at least v16 (`node --version`).
-- `npm i` or `yarn` to install dependencies.
-- `npm run dev` to start compilation in watch mode.
-
-## Manually installing the plugin
-
-- Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
-
-## Improve code quality with eslint
-- [ESLint](https://eslint.org/) is a tool that analyzes your code to quickly find problems. You can run ESLint against your plugin to find common bugs and ways to improve your code. 
-- This project already has eslint preconfigured, you can invoke a check by running`npm run lint`
-- Together with a custom eslint [plugin](https://github.com/obsidianmd/eslint-plugin) for Obsidan specific code guidelines.
-- A GitHub action is preconfigured to automatically lint every commit on all branches.
-
-## Funding URL
-
-You can include funding URLs where people who use your plugin can financially support it.
-
-The simple way is to set the `fundingUrl` field to your link in your `manifest.json` file:
-
-```json
-{
-    "fundingUrl": "https://buymeacoffee.com"
-}
+```yaml
+---
+daily-quote: "Write one sentence that belongs to today."
+daily-weather: cloud-sun
+daily-image: "https://example.com/photo.jpg"
+---
 ```
 
-If you have multiple URLs, you can also do:
+`daily-quote` is shown in the prompt card and can be edited directly from the diary view. Clearing the prompt keeps an empty `daily-quote` value, so an API quote will not overwrite your manual choice on the next render.
 
-```json
-{
-    "fundingUrl": {
-        "Buy Me a Coffee": "https://buymeacoffee.com",
-        "GitHub Sponsor": "https://github.com/sponsors",
-        "Patreon": "https://www.patreon.com/"
-    }
-}
+`daily-weather` can be an Obsidian/Lucide icon name such as `sun`, `cloud`, `cloud-rain`, `cloud-snow`, or `wind`. Common weather words such as `clear`, `cloudy`, `rain`, `snow`, `storm`, `晴`, `多云`, `雨`, and `雪` are also mapped to matching icons.
+
+`daily-image` replaces the default illustration on the left page. If it is empty or missing, Diary View keeps the built-in artwork.
+
+## Settings
+
+Open **Settings -> Community plugins -> Diary View** to configure:
+
+- **Daily quote API**: Optional URL for a daily quote endpoint. The response can be plain text or JSON using common fields such as `hitokoto`, `quote`, `content`, `text`, `sentence`, `message`, or `data`.
+
+The plugin works offline by default. It only makes network requests when you add a Daily quote API URL.
+
+## Daily Notes
+
+Diary View uses Obsidian's daily notes configuration when available:
+
+- `folder` decides where notes are stored.
+- `format` decides the note filename pattern.
+
+If no daily notes configuration is found, Diary View falls back to notes named `YYYY-MM-DD.md` at the vault root.
+
+## Installation
+
+For local development or manual testing, copy these files into:
+
+```text
+<Vault>/.obsidian/plugins/diary-view/
 ```
 
-## API Documentation
+Required files:
 
-See https://docs.obsidian.md
+- `main.js`
+- `manifest.json`
+- `styles.css`
+
+Then reload Obsidian and enable the plugin in **Settings -> Community plugins**.
+
+## Development
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Start the development build:
+
+```bash
+npm run dev
+```
+
+Create a production build:
+
+```bash
+npm run build
+```
+
+## Inspiration
+
+This plugin's notebook mood, diary-first interaction model, and page-turning presentation were inspired by Dear Diary:
+
+- Dear Diary repository: https://github.com/thebuggeddev/dear-diary
+- Dear Diary demo: https://dear-diary-three.vercel.app/
+
+Diary View is an Obsidian plugin built around local daily notes and vault frontmatter. It does not depend on Dear Diary at runtime.
+
+## Privacy
+
+Diary View stores diary data in your own vault. It does not collect telemetry. If you configure a Daily quote API, Obsidian will request that URL so the returned quote can be cached in the active daily note's frontmatter.
