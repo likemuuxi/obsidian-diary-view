@@ -73,25 +73,25 @@ export function readArtworkImage(frontmatter: unknown, key: string = DEFAULT_DAI
 }
 
 export function readBodyUnderHeading(body: string, configuredHeading: string): string {
-	const trimmedHeading = configuredHeading.trim();
-	if (!trimmedHeading) {
+	const headings = parseConfiguredHeadings(configuredHeading);
+	if (headings.length === 0) {
 		return body.trimEnd();
 	}
 
-	const heading = findHeadingSection(body, trimmedHeading);
+	const heading = findFirstHeadingSection(body, headings);
 	return heading ? body.slice(heading.contentStart, heading.end).trim() : "";
 }
 
 export function writeBodyUnderHeading(body: string, configuredHeading: string, nextSectionBody: string): string {
-	const trimmedHeading = configuredHeading.trim();
+	const headings = parseConfiguredHeadings(configuredHeading);
 	const trimmedSectionBody = nextSectionBody.trimEnd();
-	if (!trimmedHeading) {
+	if (headings.length === 0) {
 		return trimmedSectionBody;
 	}
 
-	const heading = findHeadingSection(body, trimmedHeading);
+	const heading = findFirstHeadingSection(body, headings);
 	if (!heading) {
-		return appendHeadingSection(body, trimmedHeading, trimmedSectionBody);
+		return appendHeadingSection(body, headings[0]!, trimmedSectionBody);
 	}
 
 	return joinHeadingSection(
@@ -135,14 +135,28 @@ function createHeadingLine(configuredHeading: string): string {
 	return `## ${trimmedHeading}`;
 }
 
-function findHeadingSection(body: string, configuredHeading: string): MarkdownHeadingMatch | null {
+function findFirstHeadingSection(body: string, configuredHeadings: string[]): MarkdownHeadingMatch | null {
 	const headings = getHeadingMatches(body);
 	if (headings.length === 0) {
 		return null;
 	}
 
-	const normalizedConfiguredTitle = normalizeHeadingTitle(configuredHeading);
-	return headings.find((heading) => normalizeHeadingTitle(heading.title) === normalizedConfiguredTitle) ?? null;
+	for (const configuredHeading of configuredHeadings) {
+		const normalizedConfiguredTitle = normalizeHeadingTitle(configuredHeading);
+		const heading = headings.find((item) => normalizeHeadingTitle(item.title) === normalizedConfiguredTitle);
+		if (heading) {
+			return heading;
+		}
+	}
+
+	return null;
+}
+
+function parseConfiguredHeadings(configuredHeading: string): string[] {
+	return configuredHeading
+		.split(/[\n,;]+/)
+		.map((heading) => heading.trim())
+		.filter(Boolean);
 }
 
 function getHeadingMatches(body: string): MarkdownHeadingMatch[] {

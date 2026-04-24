@@ -42,6 +42,7 @@ Open **Settings -> Community plugins -> Diary View** to configure:
 - **Daily quote API**: Optional URL for a daily quote endpoint. The response can be plain text or JSON using common fields such as `hitokoto`, `quote`, `content`, `text`, `sentence`, `message`, or `data`.
 - **Quote frontmatter key**: Frontmatter property used to read and save the daily quote. Defaults to `daily-quote`.
 - **Weather frontmatter key**: Frontmatter property used to read the daily weather icon. Defaults to `daily-weather`.
+- **Daily note heading**: Optional Markdown headings to read and write. Enter multiple headings on separate lines, or separate them with commas or semicolons. The first matching heading is used; if none exist, the first configured heading is created.
 
 The plugin works offline by default. It only makes network requests when you add a Daily quote API URL.
 

@@ -90,10 +90,11 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Daily note heading")
-			.setDesc("Optional. When set, the diary view reads and writes only the content under this Markdown heading.")
-			.addText((text) => {
+			.setDesc("Optional. Enter one or more Markdown headings. The diary view uses the first matching heading, and creates the first one when none exist.")
+			.addTextArea((text) => {
+				text.inputEl.rows = 3;
 				text
-					.setPlaceholder("Diary")
+					.setPlaceholder("Diary\nJournal\nDaily note")
 					.setValue(this.plugin.settings.dailyNoteHeading)
 					.onChange(async (value) => {
 						this.plugin.settings.dailyNoteHeading = value.trim();

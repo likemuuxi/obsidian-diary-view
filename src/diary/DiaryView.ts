@@ -725,6 +725,12 @@ export class DiaryView extends ItemView {
 		let footerCountEl: HTMLElement;
 		if (isPreview) {
 			const previewEl = linedPaperEl.createDiv({ cls: "diary-markdown-preview markdown-rendered" });
+			if (!isBackFace) {
+				previewEl.addEventListener("dblclick", () => {
+					this.isMarkdownPreview = false;
+					void this.render();
+				});
+			}
 			if (currentMarkdown.trim()) {
 				await MarkdownRenderer.render(this.app, currentMarkdown, previewEl, content.filePath, this);
 				this.bindMarkdownLinks(previewEl, content.filePath);
