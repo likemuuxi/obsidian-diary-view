@@ -4,11 +4,13 @@ import type DiaryViewPlugin from "./main";
 export interface DiaryViewSettings {
 	dailyQuoteApiUrl: string;
 	dailyImageFrontmatterKey: string;
+	dailyNoteHeading: string;
 }
 
 export const DEFAULT_SETTINGS: DiaryViewSettings = {
 	dailyQuoteApiUrl: "",
 	dailyImageFrontmatterKey: "daily-image",
+	dailyNoteHeading: "",
 };
 
 export class DiaryViewSettingTab extends PluginSettingTab {
@@ -49,6 +51,20 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 						const nextValue = value.trim() || DEFAULT_SETTINGS.dailyImageFrontmatterKey;
 						this.plugin.settings.dailyImageFrontmatterKey = nextValue;
 						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName("Daily note heading")
+			.setDesc("Optional. When set, the diary view reads and writes only the content under this Markdown heading.")
+			.addText((text) => {
+				text
+					.setPlaceholder("Diary")
+					.setValue(this.plugin.settings.dailyNoteHeading)
+					.onChange(async (value) => {
+						this.plugin.settings.dailyNoteHeading = value.trim();
+						await this.plugin.saveSettings();
+						await this.plugin.refreshAllDiaryViews();
 					});
 			});
 	}

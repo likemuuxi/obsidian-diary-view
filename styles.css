@@ -700,6 +700,12 @@
 	margin-bottom: 16px;
 }
 
+.diary-intention-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
 .diary-intention-label {
 	min-width: 0;
 	align-items: center;
@@ -1279,4 +1285,252 @@
 	.diary-lined-paper {
 		min-height: 0;
 	}
+}
+
+.diary-date-picker {
+	position: fixed;
+	z-index: 9999;
+	width: 296px;
+	padding: 16px;
+	border: 1px solid #e2e8f0;
+	border-radius: 20px;
+	background: #ffffff;
+	box-shadow:
+		0 20px 50px -12px rgba(0, 0, 0, 0.18),
+		0 8px 20px -8px rgba(0, 0, 0, 0.1);
+	animation: diary-date-picker-in 180ms ease-out;
+}
+
+.theme-dark .diary-date-picker {
+	background: #1a1a1a;
+	border-color: #2a2a2a;
+	box-shadow:
+		0 20px 50px -12px rgba(0, 0, 0, 0.8),
+		0 8px 20px -8px rgba(0, 0, 0, 0.5);
+}
+
+@keyframes diary-date-picker-in {
+	from {
+		opacity: 0;
+		transform: translateY(-6px) scale(0.97);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
+}
+
+.diary-date-picker-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	margin-bottom: 14px;
+}
+
+.diary-date-picker-nav {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	border: 1px solid #e2e8f0;
+	border-radius: 10px;
+	background: transparent !important;
+	box-shadow: none !important;
+	color: #6b7280;
+	cursor: pointer;
+	transition:
+		transform 150ms ease,
+		color 150ms ease,
+		border-color 150ms ease;
+}
+
+.theme-dark .diary-date-picker-nav {
+	border-color: #333333;
+	color: #a3a3a3;
+}
+
+.diary-date-picker-nav:hover {
+	transform: translateY(-1px);
+	border-color: #93c5fd;
+	color: #60a5fa;
+}
+
+.diary-date-picker-nav svg {
+	width: 16px;
+	height: 16px;
+	stroke-width: 2;
+}
+
+.diary-date-picker-title {
+	font-size: 14px;
+	font-weight: 800;
+	letter-spacing: -0.01em;
+	color: #111827;
+	user-select: none;
+}
+
+.theme-dark .diary-date-picker-title {
+	color: #f5f5f5;
+}
+
+.diary-date-picker-grid {
+	display: grid;
+	grid-template-columns: repeat(7, 1fr);
+	gap: 2px;
+	text-align: center;
+}
+
+.diary-date-picker-weekday {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	height: 30px;
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: #94a3b8;
+	user-select: none;
+}
+
+.theme-dark .diary-date-picker-weekday {
+	color: #525252;
+}
+
+.diary-date-picker-empty {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	height: 34px;
+}
+
+.diary-date-picker-day {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	height: 34px;
+	border-radius: 10px;
+	font-size: 13px;
+	font-weight: 600;
+	color: #111827;
+	cursor: pointer;
+	transition:
+		transform 120ms ease,
+		background-color 120ms ease,
+		color 120ms ease;
+	position: relative;
+}
+
+.theme-dark .diary-date-picker-day {
+	color: #f5f5f5;
+}
+
+.diary-date-picker-day:hover {
+	background: #eff6ff;
+	color: #60a5fa;
+	transform: scale(1.08);
+}
+
+.theme-dark .diary-date-picker-day:hover {
+	background: #1e293b;
+}
+
+.diary-date-picker-day.is-today {
+	font-weight: 800;
+	color: #60a5fa;
+}
+
+.diary-date-picker-day.is-today::after {
+	content: "";
+	position: absolute;
+	bottom: 3px;
+	left: 50%;
+	transform: translateX(-50%);
+	width: 4px;
+	height: 4px;
+	border-radius: 999px;
+	background: #60a5fa;
+}
+
+.diary-date-picker-day.is-active {
+	background: #60a5fa;
+	color: #ffffff;
+	box-shadow: 0 3px 8px rgba(96, 165, 250, 0.35);
+	font-weight: 800;
+}
+
+.theme-dark .diary-date-picker-day.is-active {
+	background: #60a5fa;
+	color: #ffffff;
+}
+
+.diary-date-picker-day.is-active::after {
+	display: none;
+}
+
+.diary-date-picker-day.has-note::before {
+	content: "";
+	position: absolute;
+	bottom: 4px;
+	left: 50%;
+	transform: translateX(-50%);
+	width: 5px;
+	height: 5px;
+	border-radius: 999px;
+	background: #93c5fd;
+}
+
+.theme-dark .diary-date-picker-day.has-note::before {
+	background: #475569;
+}
+
+.diary-date-picker-day.is-active.has-note::before {
+	background: #ffffff;
+}
+
+.diary-date-picker-footer {
+	display: flex;
+	justify-content: center;
+	margin-top: 12px;
+}
+
+.diary-date-picker-today {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	padding: 6px 16px;
+	border: 1px solid color-mix(in srgb, #60a5fa 30%, transparent);
+	border-radius: 10px;
+	background: color-mix(in srgb, #60a5fa 10%, transparent) !important;
+	box-shadow: none !important;
+	color: #60a5fa;
+	font-size: 12px;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	cursor: pointer;
+	transition:
+		transform 150ms ease,
+		background 150ms ease,
+		border-color 150ms ease;
+}
+
+.theme-dark .diary-date-picker-today {
+	border-color: color-mix(in srgb, #60a5fa 25%, #333333);
+	background: color-mix(in srgb, #60a5fa 8%, transparent) !important;
+}
+
+.diary-date-picker-today:hover {
+	transform: translateY(-1px);
+	background: color-mix(in srgb, #60a5fa 20%, transparent) !important;
+	border-color: color-mix(in srgb, #60a5fa 50%, transparent);
+}
+
+.diary-date-picker-today-icon svg {
+	width: 14px;
+	height: 14px;
+	stroke-width: 2;
 }

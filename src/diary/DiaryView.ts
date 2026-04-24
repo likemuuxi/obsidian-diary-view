@@ -4,11 +4,15 @@ import {
 	DAILY_QUOTE_FRONTMATTER_KEY,
 	DEFAULT_DAILY_IMAGE_FRONTMATTER_KEY,
 	readArtworkImage,
+	readBodyUnderHeading,
 	readDailyQuote,
 	readWeatherIcon,
 	splitFrontmatter,
+	writeBodyUnderHeading,
 } from "./frontmatter";
 import { VIEW_TYPE_DIARY } from "../types";
+
+const AUTOSAVE_DELAY_MS = 1500;
 
 interface DiaryDateItem {
 	id: string;
@@ -55,6 +59,10 @@ export class DiaryView extends ItemView {
 	private promptDrafts = new Map<string, string>();
 	private renderVersion = 0;
 	private pendingQuoteRequests = new Map<string, Promise<string | null>>();
+	private datePickerOpen = false;
+	private datePickerMonth = new Date().getMonth();
+	private datePickerYear = new Date().getFullYear();
+	private datePickerCleanup: (() => void) | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: DiaryViewPlugin) {
 		super(leaf);
@@ -82,14 +90,12 @@ export class DiaryView extends ItemView {
 	}
 
 	async onClose(): Promise<void> {
+		this.closeDatePicker();
 		if (this.animationFallbackId !== null) {
 			window.clearTimeout(this.animationFallbackId);
 			this.animationFallbackId = null;
 		}
-		this.saveTimers.forEach((timerId) => window.clearTimeout(timerId));
-		this.saveTimers.clear();
-		this.promptSaveTimers.forEach((timerId) => window.clearTimeout(timerId));
-		this.promptSaveTimers.clear();
+		await this.flushPendingSaves();
 		this.contentEl.empty();
 	}
 
@@ -105,6 +111,7 @@ export class DiaryView extends ItemView {
 	}
 
 	private async render(): Promise<void> {
+		this.closeDatePicker();
 		const renderVersion = ++this.renderVersion;
 		const { contentEl } = this;
 
@@ -220,17 +227,18 @@ export class DiaryView extends ItemView {
 		dayTextEl.createSpan({ cls: "diary-day-name", text: dateInfo.fullDay });
 		dayTextEl.createSpan({ cls: "diary-day-date", text: `${dateInfo.month} ${dateInfo.day}, ${dateInfo.year}` });
 
-		const settingsButtonEl = headerEl.createEl("button", {
+		const datePickerButtonEl = headerEl.createEl("button", {
 			cls: "diary-header-button",
 			attr: {
 				type: "button",
-				"aria-label": content.exists ? `Open ${content.filePath}` : `Create and open ${content.filePath}`,
-				title: content.exists ? `Open ${content.filePath}` : `Create and open ${content.filePath}`,
+				"aria-label": "Pick a date",
+				title: "Pick a date",
 			},
 		});
-		setIcon(settingsButtonEl, content.exists ? "file-check-2" : "file-question");
-		settingsButtonEl.addEventListener("click", () => {
-			void this.openDailyNote(content.filePath);
+		setIcon(datePickerButtonEl, "calendar");
+		datePickerButtonEl.addEventListener("click", (evt) => {
+			this.toggleDatePicker(datePickerButtonEl, dateInfo);
+			evt.stopPropagation();
 		});
 
 		const artworkWrapEl = pageEl.createDiv({ cls: "diary-artwork-wrap" });
@@ -309,6 +317,9 @@ export class DiaryView extends ItemView {
 				this.scheduleDailyPromptSave(content.filePath, promptTextEl.value);
 				this.resizePromptTextarea(promptTextEl);
 			});
+			promptTextEl.addEventListener("blur", () => {
+				void this.flushPendingPromptSave(content.filePath);
+			});
 		}
 
 		const promptDecorationEl = promptCardEl.createDiv({ cls: "diary-prompt-decoration" });
@@ -325,8 +336,23 @@ export class DiaryView extends ItemView {
 			cls: "diary-intention-title",
 			text: content.exists ? "Daily note content" : "No daily note exists for this date yet.",
 		});
+		const intentionActionsEl = intentionHeadEl.createDiv({ cls: "diary-intention-actions" });
+		const openFileButtonEl = this.renderPromptAction(
+			intentionActionsEl,
+			content.exists ? "file-check-2" : "file-question",
+			content.exists ? `Open ${content.filePath}` : `Create and open ${content.filePath}`,
+		);
+		openFileButtonEl.addClass("diary-preview-toggle", "is-toggle");
+		if (!isBackFace) {
+			openFileButtonEl.addEventListener("click", () => {
+				void this.openDailyNote(content.filePath);
+			});
+		} else {
+			openFileButtonEl.disabled = true;
+		}
+
 		const previewButtonEl = this.renderPromptAction(
-			intentionHeadEl,
+			intentionActionsEl,
 			isPreview ? "pencil" : "eye",
 			isPreview ? "Switch to editing" : "Preview Markdown",
 		);
@@ -367,6 +393,9 @@ export class DiaryView extends ItemView {
 					this.scheduleDailyNoteSave(content.filePath, textareaEl.value);
 					this.updateFooterWordCount(footerCountEl, textareaEl.value);
 				});
+				textareaEl.addEventListener("blur", () => {
+					void this.flushPendingNoteSave(content.filePath);
+				});
 			}
 		}
 
@@ -395,6 +424,218 @@ export class DiaryView extends ItemView {
 		cloudEl.createDiv({ cls: "diary-artwork-cloud-part is-left" });
 		cloudEl.createDiv({ cls: "diary-artwork-cloud-part is-center" });
 		cloudEl.createDiv({ cls: "diary-artwork-cloud-part is-right" });
+	}
+
+	private toggleDatePicker(anchorEl: HTMLElement, currentDate: DiaryDateItem): void {
+		if (this.datePickerOpen) {
+			this.closeDatePicker();
+			return;
+		}
+
+		const activeDate = this.getDateById(this.activeDateId);
+		this.datePickerMonth = activeDate.date.getMonth();
+		this.datePickerYear = activeDate.date.getFullYear();
+		this.datePickerOpen = true;
+
+		const panelEl = document.body.createDiv({ cls: "diary-date-picker" });
+		this.renderDatePickerContent(panelEl);
+
+		const anchorRect = anchorEl.getBoundingClientRect();
+		const panelHeight = panelEl.offsetHeight || 320;
+		const panelWidth = panelEl.offsetWidth || 300;
+		let top = anchorRect.bottom + 8;
+		let left = anchorRect.left + anchorRect.width / 2 - panelWidth / 2;
+		if (top + panelHeight > window.innerHeight) {
+			top = anchorRect.top - panelHeight - 8;
+		}
+		if (left < 8) left = 8;
+		if (left + panelWidth > window.innerWidth - 8) left = window.innerWidth - panelWidth - 8;
+		panelEl.style.top = `${top}px`;
+		panelEl.style.left = `${left}px`;
+
+		const onClickOutside = (evt: MouseEvent): void => {
+			if (!panelEl.contains(evt.target as Node) && evt.target !== anchorEl) {
+				this.closeDatePicker();
+			}
+		};
+
+		const onKeyDown = (evt: KeyboardEvent): void => {
+			if (evt.key === "Escape") {
+				this.closeDatePicker();
+			}
+		};
+
+		document.addEventListener("click", onClickOutside, true);
+		document.addEventListener("keydown", onKeyDown);
+		this.datePickerCleanup = () => {
+			document.removeEventListener("click", onClickOutside, true);
+			document.removeEventListener("keydown", onKeyDown);
+			panelEl.remove();
+		};
+	}
+
+	private closeDatePicker(): void {
+		if (this.datePickerCleanup) {
+			this.datePickerCleanup();
+			this.datePickerCleanup = null;
+		}
+		this.datePickerOpen = false;
+	}
+
+	private renderDatePickerContent(panelEl: HTMLElement): void {
+		const monthNames = [
+			"January", "February", "March", "April", "May", "June",
+			"July", "August", "September", "October", "November", "December",
+		];
+		const weekDays = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+
+		const headerEl = panelEl.createDiv({ cls: "diary-date-picker-header" });
+		const prevBtn = headerEl.createEl("button", {
+			cls: "diary-date-picker-nav",
+			attr: { type: "button", "aria-label": "Previous month" },
+		});
+		setIcon(prevBtn, "chevron-left");
+		prevBtn.addEventListener("click", (evt) => {
+			evt.stopPropagation();
+			this.datePickerMonth--;
+			if (this.datePickerMonth < 0) {
+				this.datePickerMonth = 11;
+				this.datePickerYear--;
+			}
+			this.refreshDatePickerContent(panelEl);
+		});
+
+		headerEl.createSpan({ cls: "diary-date-picker-title", text: `${monthNames[this.datePickerMonth]} ${this.datePickerYear}` });
+
+		const nextBtn = headerEl.createEl("button", {
+			cls: "diary-date-picker-nav",
+			attr: { type: "button", "aria-label": "Next month" },
+		});
+		setIcon(nextBtn, "chevron-right");
+		nextBtn.addEventListener("click", (evt) => {
+			evt.stopPropagation();
+			this.datePickerMonth++;
+			if (this.datePickerMonth > 11) {
+				this.datePickerMonth = 0;
+				this.datePickerYear++;
+			}
+			this.refreshDatePickerContent(panelEl);
+		});
+
+		const gridEl = panelEl.createDiv({ cls: "diary-date-picker-grid" });
+		weekDays.forEach((d) => {
+			gridEl.createSpan({ cls: "diary-date-picker-weekday", text: d });
+		});
+
+		this.renderDatePickerDays(gridEl);
+
+		const footerEl = panelEl.createDiv({ cls: "diary-date-picker-footer" });
+		const todayBtn = footerEl.createEl("button", {
+			cls: "diary-date-picker-today",
+			attr: { type: "button" },
+		});
+		const todayIconEl = todayBtn.createDiv({ cls: "diary-date-picker-today-icon" });
+		setIcon(todayIconEl, "calendar-clock");
+		todayBtn.createSpan({ text: "Today" });
+		todayBtn.addEventListener("click", (evt) => {
+			evt.stopPropagation();
+			const today = new Date();
+			today.setHours(0, 0, 0, 0);
+			this.closeDatePicker();
+			this.navigateToDate(today);
+		});
+	}
+
+	private refreshDatePickerContent(panelEl: HTMLElement): void {
+		const monthNames = [
+			"January", "February", "March", "April", "May", "June",
+			"July", "August", "September", "October", "November", "December",
+		];
+		const titleEl = panelEl.querySelector(".diary-date-picker-title");
+		if (titleEl) {
+			titleEl.textContent = `${monthNames[this.datePickerMonth]} ${this.datePickerYear}`;
+		}
+
+		const gridEl = panelEl.querySelector(".diary-date-picker-grid");
+		if (gridEl) {
+			const weekdays = gridEl.querySelectorAll(".diary-date-picker-weekday");
+			const days = gridEl.querySelectorAll(".diary-date-picker-day, .diary-date-picker-empty");
+			days.forEach((el) => el.remove());
+			this.renderDatePickerDays(gridEl as HTMLElement);
+		}
+	}
+
+	private renderDatePickerDays(gridEl: HTMLElement): void {
+		const firstDay = new Date(this.datePickerYear, this.datePickerMonth, 1).getDay();
+		const daysInMonth = new Date(this.datePickerYear, this.datePickerMonth + 1, 0).getDate();
+		const activeDate = this.getDateById(this.activeDateId);
+		const today = new Date();
+		today.setHours(0, 0, 0, 0);
+
+		for (let i = 0; i < firstDay; i++) {
+			gridEl.createSpan({ cls: "diary-date-picker-empty" });
+		}
+
+		for (let day = 1; day <= daysInMonth; day++) {
+			const cellDate = new Date(this.datePickerYear, this.datePickerMonth, day);
+			cellDate.setHours(0, 0, 0, 0);
+			const cellId = this.formatDateId(cellDate);
+
+			const isToday = cellDate.getTime() === today.getTime();
+			const isActive = cellDate.getTime() === activeDate.date.getTime();
+			const path = this.getDailyNotePath(cellDate);
+			const hasNote = this.app.vault.getAbstractFileByPath(path) instanceof TFile;
+
+			const cls = [
+				"diary-date-picker-day",
+				isActive ? "is-active" : "",
+				isToday ? "is-today" : "",
+				hasNote ? "has-note" : "",
+			].filter(Boolean).join(" ");
+
+			const dayEl = gridEl.createSpan({ cls, text: String(day) });
+			dayEl.addEventListener("click", (evt) => {
+				evt.stopPropagation();
+				this.closeDatePicker();
+				this.navigateToDate(cellDate);
+			});
+		}
+	}
+
+	private navigateToDate(targetDate: Date): void {
+		const target = new Date(targetDate);
+		target.setHours(0, 0, 0, 0);
+		const targetId = this.formatDateId(target);
+
+		this.dates = this.buildDateItems(target);
+
+		if (this.isAnimating || targetId === this.activeDateId) {
+			return;
+		}
+
+		const currentIndex = this.dates.findIndex((date) => date.id === this.activeDateId);
+		const targetIndex = this.dates.findIndex((date) => date.id === targetId);
+		if (targetIndex === -1) return;
+
+		if (!this.shouldUsePageFlip()) {
+			this.previousDateId = this.activeDateId;
+			this.activeDateId = targetId;
+			this.pendingDateId = null;
+			this.isAnimating = false;
+			void this.render();
+			return;
+		}
+
+		this.direction = targetIndex > currentIndex ? "next" : "prev";
+		this.previousDateId = this.activeDateId;
+		if (this.direction === "next") {
+			this.pendingDateId = null;
+			this.activeDateId = targetId;
+		} else {
+			this.pendingDateId = targetId;
+		}
+		this.isAnimating = true;
+		void this.render();
 	}
 
 	private resolveArtworkImageSource(value: string | null, sourcePath: string): string | null {
@@ -543,7 +784,8 @@ export class DiaryView extends ItemView {
 		}
 
 		const rawContent = (await this.app.vault.cachedRead(file)).replace(/\r\n/g, "\n");
-		const markdown = splitFrontmatter(rawContent).body.trimEnd();
+		const body = splitFrontmatter(rawContent).body;
+		const markdown = readBodyUnderHeading(body, this.plugin.settings.dailyNoteHeading);
 		const wordCount = this.countWords(markdown);
 		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
 		const dailyQuote = readDailyQuote(frontmatter) ?? await this.fetchAndCacheDailyQuote(file);
@@ -877,7 +1119,7 @@ export class DiaryView extends ItemView {
 		const timerId = window.setTimeout(() => {
 			this.saveTimers.delete(path);
 			void this.saveDailyNote(path, markdown);
-		}, 500);
+		}, AUTOSAVE_DELAY_MS);
 		this.saveTimers.set(path, timerId);
 	}
 
@@ -890,13 +1132,12 @@ export class DiaryView extends ItemView {
 		const timerId = window.setTimeout(() => {
 			this.promptSaveTimers.delete(path);
 			void this.saveDailyPrompt(path, promptText);
-		}, 500);
+		}, AUTOSAVE_DELAY_MS);
 		this.promptSaveTimers.set(path, timerId);
 	}
 
 	private async saveDailyPrompt(path: string, promptText: string): Promise<void> {
 		let file = this.app.vault.getAbstractFileByPath(path);
-		const shouldRefreshAfterSave = !(file instanceof TFile);
 		if (!(file instanceof TFile)) {
 			await this.ensureParentFolder(path);
 			this.plugin.suppressVaultRefresh(path, 1000);
@@ -914,9 +1155,6 @@ export class DiaryView extends ItemView {
 				frontmatter[DAILY_QUOTE_FRONTMATTER_KEY] = normalizedPromptText;
 			});
 			this.promptDrafts.set(path, normalizedPromptText);
-			if (shouldRefreshAfterSave) {
-				await this.plugin.refreshAllDiaryViews();
-			}
 		} catch (error) {
 			console.warn("Failed to save daily prompt in frontmatter", error);
 		}
@@ -927,21 +1165,57 @@ export class DiaryView extends ItemView {
 		const file = this.app.vault.getAbstractFileByPath(path);
 		if (file instanceof TFile) {
 			const rawContent = (await this.app.vault.cachedRead(file)).replace(/\r\n/g, "\n");
-			const { frontmatter } = splitFrontmatter(rawContent);
+			const { frontmatter, body } = splitFrontmatter(rawContent);
+			const nextBody = writeBodyUnderHeading(body, this.plugin.settings.dailyNoteHeading, normalizedMarkdown);
 			const nextContent = frontmatter
-				? normalizedMarkdown
-					? `${frontmatter}\n\n${normalizedMarkdown}`
+				? nextBody
+					? `${frontmatter}\n\n${nextBody}`
 					: frontmatter
-				: normalizedMarkdown;
+				: nextBody;
 			this.plugin.suppressVaultRefresh(path);
 			await this.app.vault.modify(file, nextContent);
 		} else {
 			await this.ensureParentFolder(path);
+			const nextBody = writeBodyUnderHeading("", this.plugin.settings.dailyNoteHeading, normalizedMarkdown);
 			this.plugin.suppressVaultRefresh(path);
-			await this.app.vault.create(path, normalizedMarkdown);
+			await this.app.vault.create(path, nextBody);
+		}
+		this.drafts.set(path, normalizedMarkdown);
+	}
+
+	private async flushPendingSaves(): Promise<void> {
+		const notePaths = Array.from(this.saveTimers.keys());
+		const promptPaths = Array.from(this.promptSaveTimers.keys());
+		await Promise.all([
+			...notePaths.map((path) => this.flushPendingNoteSave(path)),
+			...promptPaths.map((path) => this.flushPendingPromptSave(path)),
+		]);
+	}
+
+	private async flushPendingNoteSave(path: string): Promise<void> {
+		const timerId = this.saveTimers.get(path);
+		if (timerId !== undefined) {
+			window.clearTimeout(timerId);
+			this.saveTimers.delete(path);
 		}
 
-		await this.plugin.refreshAllDiaryViews();
+		const draft = this.drafts.get(path);
+		if (draft !== undefined) {
+			await this.saveDailyNote(path, draft);
+		}
+	}
+
+	private async flushPendingPromptSave(path: string): Promise<void> {
+		const timerId = this.promptSaveTimers.get(path);
+		if (timerId !== undefined) {
+			window.clearTimeout(timerId);
+			this.promptSaveTimers.delete(path);
+		}
+
+		const draft = this.promptDrafts.get(path);
+		if (draft !== undefined) {
+			await this.saveDailyPrompt(path, draft);
+		}
 	}
 
 	private async ensureParentFolder(path: string): Promise<void> {
