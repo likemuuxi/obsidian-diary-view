@@ -1,4 +1,6 @@
 import { ItemView, MarkdownRenderer, moment, normalizePath, requestUrl, setIcon, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import $ from "jquery";
+import "turn.js";
 import type DiaryViewPlugin from "../main";
 import {
 	DAILY_QUOTE_FRONTMATTER_KEY,
@@ -13,6 +15,9 @@ import {
 import { VIEW_TYPE_DIARY } from "../types";
 
 const AUTOSAVE_DELAY_MS = 1500;
+const DESKTOP_BREAKPOINT_QUERY = "(min-width: 960px)";
+const SWIPE_MIN_DISTANCE_PX = 90;
+const TURN_NATIVE_CORNER_SIZE_PX = 120;
 
 interface DiaryDateItem {
 	id: string;
@@ -47,12 +52,7 @@ export class DiaryView extends ItemView {
 	private plugin: DiaryViewPlugin;
 	private dates: DiaryDateItem[] = [];
 	private activeDateId = "";
-	private previousDateId = "";
-	private pendingDateId: string | null = null;
-	private direction: "next" | "prev" = "next";
-	private isAnimating = false;
 	private isMarkdownPreview = true;
-	private animationFallbackId: number | null = null;
 	private saveTimers = new Map<string, number>();
 	private promptSaveTimers = new Map<string, number>();
 	private drafts = new Map<string, string>();
@@ -63,13 +63,20 @@ export class DiaryView extends ItemView {
 	private datePickerMonth = new Date().getMonth();
 	private datePickerYear = new Date().getFullYear();
 	private datePickerCleanup: (() => void) | null = null;
+	private usingTurnBook = false;
+	private turnBookEl: HTMLElement | null = null;
+	private turnViewportEl: HTMLElement | null = null;
+	private turnLeftFillEl: HTMLElement | null = null;
+	private turnRightFillEl: HTMLElement | null = null;
+	private turnBookReady = false;
+	private turnResizeObserver: ResizeObserver | null = null;
+	private turnResizeFrame: number | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: DiaryViewPlugin) {
 		super(leaf);
 		this.plugin = plugin;
 		this.dates = this.buildDateItems();
 		this.activeDateId = this.formatDateId(new Date());
-		this.previousDateId = this.activeDateId;
 	}
 
 	getViewType(): string {
@@ -86,14 +93,32 @@ export class DiaryView extends ItemView {
 
 	async onOpen(): Promise<void> {
 		this.containerEl.addClass("diary-view");
+		this.registerDomEvent(window, "resize", () => {
+			const shouldUseTurnBook = this.shouldUsePageFlip();
+			if (shouldUseTurnBook !== this.usingTurnBook) {
+				void this.render();
+				return;
+			}
+			if (shouldUseTurnBook) {
+				this.scheduleTurnBookResize();
+			}
+		});
+		this.registerDomEvent(window, "mouseup", () => {
+			this.hideTurnDragFills();
+		});
+		this.registerDomEvent(window, "blur", () => {
+			this.hideTurnDragFills();
+		});
 		await this.render();
 	}
 
 	async onClose(): Promise<void> {
 		this.closeDatePicker();
-		if (this.animationFallbackId !== null) {
-			window.clearTimeout(this.animationFallbackId);
-			this.animationFallbackId = null;
+		this.turnResizeObserver?.disconnect();
+		this.turnResizeObserver = null;
+		if (this.turnResizeFrame !== null) {
+			window.cancelAnimationFrame(this.turnResizeFrame);
+			this.turnResizeFrame = null;
 		}
 		await this.flushPendingSaves();
 		this.contentEl.empty();
@@ -103,9 +128,6 @@ export class DiaryView extends ItemView {
 		this.dates = this.buildDateItems();
 		if (!this.dates.some((date) => date.id === this.activeDateId)) {
 			this.activeDateId = this.formatDateId(new Date());
-			this.previousDateId = this.activeDateId;
-			this.pendingDateId = null;
-			this.isAnimating = false;
 		}
 		await this.render();
 	}
@@ -113,43 +135,87 @@ export class DiaryView extends ItemView {
 	private async render(): Promise<void> {
 		this.closeDatePicker();
 		const renderVersion = ++this.renderVersion;
-		const { contentEl } = this;
-
-		const currentDate = this.getDateById(this.activeDateId);
-		const previousDate = this.getDateById(this.previousDateId);
-		const pendingDate = this.pendingDateId ? this.getDateById(this.pendingDateId) : currentDate;
-		const contentById = await this.loadContentByIds([currentDate.id, previousDate.id, pendingDate.id]);
+		const useTurnBook = this.shouldUsePageFlip();
+		const contentIds = useTurnBook
+			? this.dates.map((date) => date.id)
+			: [this.getDateById(this.activeDateId).id];
+		const contentById = await this.loadContentByIds(contentIds);
 		if (renderVersion !== this.renderVersion) {
 			return;
 		}
 
-		contentEl.empty();
+		this.usingTurnBook = useTurnBook;
+		if (useTurnBook) {
+			await this.renderDesktopTurnBook(contentById);
+		} else {
+			this.turnResizeObserver?.disconnect();
+			this.turnResizeObserver = null;
+			this.turnBookEl = null;
+			this.turnViewportEl = null;
+			this.turnLeftFillEl = null;
+			this.turnRightFillEl = null;
+			this.turnBookReady = false;
+			await this.renderMobileNotebook(contentById);
+		}
+	}
 
-		const currentContent = contentById.get(currentDate.id) ?? this.createMissingContent(currentDate);
-		const previousContent = contentById.get(previousDate.id) ?? this.createMissingContent(previousDate);
-		const pendingContent = contentById.get(pendingDate.id) ?? currentContent;
-		const incomingDate = this.direction === "next" ? pendingDate : currentDate;
-		const incomingContent = this.direction === "next" ? pendingContent : currentContent;
-		const outgoingDate = this.direction === "next" ? currentDate : previousDate;
-		const outgoingContent = this.direction === "next" ? currentContent : previousContent;
-		const calendarDates = this.dates.slice(0, 7);
-		const shouldAnimate = this.isAnimating;
+	private async renderDesktopTurnBook(contentById: Map<string, DiaryPageContent>): Promise<void> {
+		const { contentEl } = this;
+		contentEl.empty();
 
 		const shellEl = contentEl.createDiv({ cls: "diary-shell" });
 		const stageEl = shellEl.createDiv({ cls: "diary-stage" });
 		const notebookEl = stageEl.createDiv({ cls: "diary-notebook" });
 		notebookEl.createDiv({ cls: "diary-notebook-stitch" });
 
-		const pagesWrapEl = notebookEl.createDiv({ cls: "diary-pages-wrap" });
+		const pagesWrapEl = notebookEl.createDiv({ cls: "diary-pages-wrap is-turn-book" });
 		pagesWrapEl.createDiv({ cls: "diary-page-stack is-front" });
 		pagesWrapEl.createDiv({ cls: "diary-page-stack is-back" });
+
+		const viewportEl = pagesWrapEl.createDiv({ cls: "diary-turn-viewport" });
+		const leftFillEl = viewportEl.createDiv({ cls: "diary-turn-side-fill is-left" });
+		const rightFillEl = viewportEl.createDiv({ cls: "diary-turn-side-fill is-right" });
+		const turnBookEl = viewportEl.createDiv({ cls: "diary-turn-book" });
+		const calendarDates = this.dates.slice(0, 7);
+
+		turnBookEl.createDiv({ cls: "diary-turn-sheet is-placeholder" });
+		for (const dateInfo of this.dates) {
+			const content = contentById.get(dateInfo.id) ?? this.createMissingContent(dateInfo);
+			const leftEl = turnBookEl.createDiv({ cls: "diary-turn-sheet is-left" });
+			leftEl.dataset.dateId = dateInfo.id;
+			this.renderLeftPage(leftEl, dateInfo, content, calendarDates);
+			const rightEl = turnBookEl.createDiv({ cls: "diary-turn-sheet is-right" });
+			rightEl.dataset.dateId = dateInfo.id;
+			await this.renderRightPage(rightEl, content);
+		}
+
+		this.turnBookEl = turnBookEl;
+		this.turnViewportEl = viewportEl;
+		this.turnLeftFillEl = leftFillEl;
+		this.turnRightFillEl = rightFillEl;
+		this.turnBookReady = false;
+		this.bindTurnDragGuard(viewportEl);
+		this.bindMouseSwipeGesture(pagesWrapEl);
+		this.ensureTurnBookInitialized();
+		this.attachTurnBookResize(viewportEl);
+	}
+
+	private async renderMobileNotebook(contentById: Map<string, DiaryPageContent>): Promise<void> {
+		const { contentEl } = this;
+		contentEl.empty();
+
+		const currentDate = this.getDateById(this.activeDateId);
+		const currentContent = contentById.get(currentDate.id) ?? this.createMissingContent(currentDate);
+		const calendarDates = this.dates.slice(0, 7);
+
+		const shellEl = contentEl.createDiv({ cls: "diary-shell" });
+		const stageEl = shellEl.createDiv({ cls: "diary-stage" });
+		const notebookEl = stageEl.createDiv({ cls: "diary-notebook" });
+		const pagesWrapEl = notebookEl.createDiv({ cls: "diary-pages-wrap" });
 
 		const leftBaseEl = pagesWrapEl.createDiv({ cls: "diary-base-page is-left" });
 		const leftMobileEl = leftBaseEl.createDiv({ cls: "diary-mobile-only" });
 		this.renderLeftPage(leftMobileEl, currentDate, currentContent, calendarDates);
-
-		const leftDesktopEl = leftBaseEl.createDiv({ cls: "diary-desktop-only" });
-		this.renderLeftPage(leftDesktopEl, currentDate, currentContent, calendarDates);
 
 		const mobileSpineEl = pagesWrapEl.createDiv({ cls: "diary-mobile-spine" });
 		[-92, -46, 0, 46, 92].forEach((offset) => {
@@ -158,57 +224,333 @@ export class DiaryView extends ItemView {
 
 		const rightBaseEl = pagesWrapEl.createDiv({ cls: "diary-base-page is-right" });
 		await this.renderRightPage(rightBaseEl, currentContent);
+	}
 
-		if (shouldAnimate) {
-			const flipPageEl = pagesWrapEl.createDiv({
-				cls: `diary-flip-page diary-desktop-only ${this.direction === "next" ? "is-next" : "is-prev"}`,
-			});
-			const flipFrontEl = flipPageEl.createDiv({ cls: "diary-flip-face is-front" });
-			this.renderLeftPage(
-				flipFrontEl,
-				this.direction === "next" ? incomingDate : outgoingDate,
-				this.direction === "next" ? incomingContent : outgoingContent,
-				calendarDates,
-			);
-
-			const flipBackEl = flipPageEl.createDiv({ cls: "diary-flip-face is-back" });
-			await this.renderRightPage(
-				flipBackEl,
-				this.direction === "next" ? outgoingContent : incomingContent,
-				true,
-			);
-
-			const completeAnimation = (): void => {
-				if (this.pendingDateId !== null) {
-					this.activeDateId = this.pendingDateId;
-					this.pendingDateId = null;
-				}
-				this.previousDateId = this.activeDateId;
-				this.isAnimating = false;
-				if (this.animationFallbackId !== null) {
-					window.clearTimeout(this.animationFallbackId);
-					this.animationFallbackId = null;
-				}
-				void this.render();
-			};
-
-			flipPageEl.addEventListener("animationend", completeAnimation, { once: true });
-			this.animationFallbackId = window.setTimeout(completeAnimation, 1200);
-
-			window.requestAnimationFrame(() => {
-				flipPageEl.addClass("is-animating");
-			});
-		} else {
-			this.isAnimating = false;
+	private ensureTurnBookInitialized(): void {
+		if (!this.turnBookEl || !this.turnViewportEl || this.turnBookReady) {
+			return;
 		}
 
-		pagesWrapEl.createDiv({ cls: "diary-spine-shadow is-left" });
-		pagesWrapEl.createDiv({ cls: "diary-spine-shadow is-right" });
-		pagesWrapEl.createDiv({ cls: "diary-spine-crease" });
+		const width = this.turnViewportEl.clientWidth;
+		const height = this.turnViewportEl.clientHeight;
+		if (!width || !height) {
+			this.scheduleTurnBookResize();
+			return;
+		}
 
-		["12%", "24%", "36%", "48%", "60%", "72%", "84%"].forEach((top, index) => {
-			this.renderSpineRing(pagesWrapEl, top, index);
+		const $turnBook = $(this.turnBookEl) as {
+			turn: (...args: unknown[]) => unknown;
+		};
+		const activeTurnPage = this.getTurnPageForDate(this.activeDateId) ?? 2;
+		$turnBook.turn({
+			width,
+			height,
+			display: "double",
+			duration: 950,
+			gradients: true,
+			acceleration: true,
+			page: activeTurnPage,
+			pages: this.getTotalTurnPages(),
+			when: {
+				turning: (event: { preventDefault: () => void }, page: number) => {
+					if (page < this.getFirstTurnPage()) {
+						this.hideTurnDragFills();
+						event.preventDefault();
+						return;
+					}
+				},
+				turned: (_event: unknown, page: number) => {
+					this.hideTurnDragFills();
+					const nextDateId = this.getDateIdForTurnPage(page);
+					if (!nextDateId || nextDateId === this.activeDateId) {
+						return;
+					}
+					this.activeDateId = nextDateId;
+					this.updateCalendarActiveState();
+				},
+			},
 		});
+		this.turnBookReady = true;
+		this.updateCalendarActiveState();
+	}
+
+	private attachTurnBookResize(viewportEl: HTMLElement): void {
+		this.turnResizeObserver?.disconnect();
+		this.turnResizeObserver = new ResizeObserver(() => {
+			this.scheduleTurnBookResize();
+		});
+		this.turnResizeObserver.observe(viewportEl);
+	}
+
+	private scheduleTurnBookResize(): void {
+		if (this.turnResizeFrame !== null) {
+			window.cancelAnimationFrame(this.turnResizeFrame);
+		}
+		this.turnResizeFrame = window.requestAnimationFrame(() => {
+			this.turnResizeFrame = null;
+			if (!this.turnBookEl || !this.turnViewportEl) {
+				return;
+			}
+
+			if (!this.turnBookReady) {
+				this.ensureTurnBookInitialized();
+				return;
+			}
+
+			const width = this.turnViewportEl.clientWidth;
+			const height = this.turnViewportEl.clientHeight;
+			if (!width || !height) {
+				return;
+			}
+
+			($(this.turnBookEl) as { turn: (...args: unknown[]) => unknown }).turn("size", width, height);
+		});
+	}
+
+	private bindMouseSwipeGesture(targetEl: HTMLElement): void {
+		let pointerId: number | null = null;
+		let startX = 0;
+		let startY = 0;
+		let allowSwipe = false;
+
+		targetEl.addEventListener("pointerdown", (event) => {
+			if (event.pointerType === "touch" || event.button !== 0 || this.isInteractiveTarget(event.target)) {
+				return;
+			}
+			pointerId = event.pointerId;
+			startX = event.clientX;
+			startY = event.clientY;
+			allowSwipe = !this.isNearNativeTurnCorner(event);
+		});
+
+		targetEl.addEventListener("pointerup", (event) => {
+			if (pointerId !== event.pointerId) {
+				return;
+			}
+
+			const deltaX = event.clientX - startX;
+			const deltaY = event.clientY - startY;
+			pointerId = null;
+			if (!allowSwipe) {
+				allowSwipe = false;
+				return;
+			}
+			allowSwipe = false;
+
+			if (Math.abs(deltaX) < SWIPE_MIN_DISTANCE_PX || Math.abs(deltaX) <= Math.abs(deltaY)) {
+				return;
+			}
+
+			if (deltaX < 0) {
+				this.turnToAdjacentDate("next");
+			} else {
+				this.turnToAdjacentDate("prev");
+			}
+		});
+
+		targetEl.addEventListener("pointercancel", (event) => {
+			if (pointerId === event.pointerId) {
+				pointerId = null;
+				allowSwipe = false;
+			}
+		});
+	}
+
+	private bindTurnDragGuard(targetEl: HTMLElement): void {
+		targetEl.addEventListener("mousedown", (event) => {
+			if (this.shouldBlockBoundaryTurn(event)) {
+				event.preventDefault();
+				event.stopPropagation();
+				return;
+			}
+			if (this.shouldShowTurnDragFills(event)) {
+				this.showTurnDragFills();
+			}
+		}, true);
+	}
+
+	private shouldBlockBoundaryTurn(event: MouseEvent): boolean {
+		if (!this.turnViewportEl || this.isInteractiveTarget(event.target)) {
+			return false;
+		}
+
+		const rect = this.turnViewportEl.getBoundingClientRect();
+		const localX = event.clientX - rect.left;
+		const localY = event.clientY - rect.top;
+		const nearLeftEdge = localX <= TURN_NATIVE_CORNER_SIZE_PX;
+		const nearTop = localY <= TURN_NATIVE_CORNER_SIZE_PX;
+		const nearBottom = localY >= rect.height - TURN_NATIVE_CORNER_SIZE_PX;
+		const isLeftCorner = nearLeftEdge && (nearTop || nearBottom);
+		if (!isLeftCorner) {
+			return false;
+		}
+
+		return this.activeDateId === this.dates[0]?.id;
+	}
+
+	private shouldShowTurnDragFills(event: MouseEvent): boolean {
+		if (!this.turnViewportEl || this.isInteractiveTarget(event.target)) {
+			return false;
+		}
+
+		const rect = this.turnViewportEl.getBoundingClientRect();
+		const localX = event.clientX - rect.left;
+		const localY = event.clientY - rect.top;
+		const nearLeftEdge = localX <= TURN_NATIVE_CORNER_SIZE_PX;
+		const nearRightEdge = localX >= rect.width - TURN_NATIVE_CORNER_SIZE_PX;
+		const nearTop = localY <= TURN_NATIVE_CORNER_SIZE_PX;
+		const nearBottom = localY >= rect.height - TURN_NATIVE_CORNER_SIZE_PX;
+		const isCorner = (nearLeftEdge || nearRightEdge) && (nearTop || nearBottom);
+		if (!isCorner) {
+			return false;
+		}
+
+		return nearLeftEdge || nearRightEdge;
+	}
+
+	private showTurnDragFills(): void {
+		if (!this.turnLeftFillEl || !this.turnRightFillEl) {
+			return;
+		}
+
+		this.syncTurnFillSide(this.turnLeftFillEl, this.getActiveLeftTurnSheet(), "left");
+		this.syncTurnFillSide(this.turnRightFillEl, this.getAdjacentRightTurnSheet(), "right");
+	}
+
+	private syncTurnFillSide(targetEl: HTMLElement, sourceEl: HTMLElement | null, side: "left" | "right"): void {
+		targetEl.empty();
+		if (!sourceEl) {
+			targetEl.removeClass("is-visible");
+			return;
+		}
+
+		const cloneEl = sourceEl.cloneNode(true);
+		if (!(cloneEl instanceof HTMLElement)) {
+			targetEl.removeClass("is-visible");
+			return;
+		}
+
+		cloneEl.removeClass("is-left", "is-right");
+		cloneEl.addClass("is-overlay-copy", `is-${side}`);
+		targetEl.appendChild(cloneEl);
+		targetEl.addClass("is-visible");
+	}
+
+	private hideTurnDragFills(): void {
+		for (const fillEl of [this.turnLeftFillEl, this.turnRightFillEl]) {
+			if (!fillEl) {
+				continue;
+			}
+			fillEl.removeClass("is-visible");
+			fillEl.empty();
+		}
+	}
+
+	private getActiveLeftTurnSheet(): HTMLElement | null {
+		if (!this.turnBookEl) {
+			return null;
+		}
+		return this.turnBookEl.querySelector<HTMLElement>(`.diary-turn-sheet.is-left[data-date-id="${this.activeDateId}"]`);
+	}
+
+	private getAdjacentRightTurnSheet(): HTMLElement | null {
+		if (!this.turnBookEl) {
+			return null;
+		}
+
+		const activeIndex = this.dates.findIndex((date) => date.id === this.activeDateId);
+		const nextDateId = this.dates[activeIndex + 1]?.id ?? this.activeDateId;
+		return this.turnBookEl.querySelector<HTMLElement>(`.diary-turn-sheet.is-right[data-date-id="${nextDateId}"]`);
+	}
+
+	private isNearNativeTurnCorner(event: PointerEvent): boolean {
+		if (!this.turnViewportEl) {
+			return false;
+		}
+
+		const rect = this.turnViewportEl.getBoundingClientRect();
+		const localX = event.clientX - rect.left;
+		const localY = event.clientY - rect.top;
+		const nearLeft = localX <= TURN_NATIVE_CORNER_SIZE_PX;
+		const nearRight = localX >= rect.width - TURN_NATIVE_CORNER_SIZE_PX;
+		const nearTop = localY <= TURN_NATIVE_CORNER_SIZE_PX;
+		const nearBottom = localY >= rect.height - TURN_NATIVE_CORNER_SIZE_PX;
+		return (nearLeft || nearRight) && (nearTop || nearBottom);
+	}
+
+	private isInteractiveTarget(target: EventTarget | null): boolean {
+		const element = this.getEventTargetElement(target);
+		if (!element) {
+			return false;
+		}
+		return Boolean(element.closest("button, textarea, input, select, a, .markdown-rendered, .diary-lined-paper"));
+	}
+
+	private getEventTargetElement(target: EventTarget | null): HTMLElement | null {
+		if (target instanceof HTMLElement) {
+			return target;
+		}
+
+		if (target instanceof Text) {
+			return target.parentElement;
+		}
+
+		return null;
+	}
+
+	private turnToAdjacentDate(direction: "next" | "prev"): void {
+		if (!this.turnBookEl || !this.turnBookReady) {
+			return;
+		}
+
+		if (direction === "prev" && this.activeDateId === this.dates[0]?.id) {
+			return;
+		}
+
+		($(this.turnBookEl) as { turn: (...args: unknown[]) => unknown }).turn(direction === "next" ? "next" : "previous");
+	}
+
+	private turnToDate(nextDateId: string): void {
+		const nextTurnPage = this.getTurnPageForDate(nextDateId);
+		if (nextTurnPage === null) {
+			return;
+		}
+
+		if (this.turnBookEl && this.turnBookReady) {
+			($(this.turnBookEl) as { turn: (...args: unknown[]) => unknown }).turn("page", nextTurnPage);
+			return;
+		}
+
+		this.activeDateId = nextDateId;
+		void this.render();
+	}
+
+	private getTurnPageForDate(dateId: string): number | null {
+		const index = this.dates.findIndex((date) => date.id === dateId);
+		return index === -1 ? null : index * 2 + 2;
+	}
+
+	private getDateIdForTurnPage(page: number): string | null {
+		if (page < 2) {
+			return this.dates[0]?.id ?? null;
+		}
+
+		const index = Math.floor((page - 2) / 2);
+		return this.dates[index]?.id ?? null;
+	}
+
+	private getTotalTurnPages(): number {
+		return this.dates.length * 2 + 1;
+	}
+
+	private getFirstTurnPage(): number {
+		return 2;
+	}
+
+	private updateCalendarActiveState(): void {
+		for (const itemEl of Array.from(this.contentEl.querySelectorAll<HTMLElement>(".diary-calendar-item[data-date-id]"))) {
+			itemEl.toggleClass("is-active", itemEl.dataset.dateId === this.activeDateId);
+		}
 	}
 
 	private renderLeftPage(
@@ -218,6 +560,7 @@ export class DiaryView extends ItemView {
 		calendarDates: DiaryDateItem[],
 	): void {
 		const pageEl = parentEl.createDiv({ cls: "diary-page diary-page-left" });
+		this.renderPageBindingMarks(pageEl, "right");
 
 		const headerEl = pageEl.createDiv({ cls: "diary-page-header" });
 		const dayInfoEl = headerEl.createDiv({ cls: "diary-day-info" });
@@ -273,6 +616,7 @@ export class DiaryView extends ItemView {
 			const itemEl = calendarEl.createDiv({
 				cls: `diary-calendar-item${date.id === this.activeDateId ? " is-active" : ""}${date.hasNote ? " has-note" : ""}`,
 			});
+			itemEl.dataset.dateId = date.id;
 			itemEl.addEventListener("click", () => {
 				this.handleDateChange(date.id);
 			});
@@ -290,6 +634,7 @@ export class DiaryView extends ItemView {
 		const pageEl = parentEl.createDiv({
 			cls: `diary-page diary-page-right${isBackFace ? " is-backface" : ""}`,
 		});
+		this.renderPageBindingMarks(pageEl, "left");
 		const currentMarkdown = this.drafts.get(content.filePath) ?? content.markdown;
 		const isPreview = this.isMarkdownPreview && !isBackFace;
 
@@ -417,6 +762,18 @@ export class DiaryView extends ItemView {
 		});
 		setIcon(buttonEl, icon);
 		return buttonEl;
+	}
+
+	private renderPageBindingMarks(parentEl: HTMLElement, side: "left" | "right"): void {
+		const bindingEl = parentEl.createDiv({ cls: `diary-page-binding is-${side}` });
+		["12%", "24%", "36%", "48%", "60%", "72%", "84%"].forEach((top, index) => {
+			const markEl = bindingEl.createDiv({ cls: `diary-page-binding-mark is-${side} is-mark-${index + 1}` });
+			markEl.style.top = top;
+			markEl.createDiv({ cls: "diary-page-binding-punch" });
+			markEl.createDiv({ cls: "diary-page-binding-ring-shadow" });
+			markEl.createDiv({ cls: "diary-page-binding-ring" });
+			markEl.createDiv({ cls: "diary-page-binding-ring-highlight" });
+		});
 	}
 
 	private renderCloud(parentEl: HTMLElement, variant: string): void {
@@ -607,34 +964,13 @@ export class DiaryView extends ItemView {
 		target.setHours(0, 0, 0, 0);
 		const targetId = this.formatDateId(target);
 
+		if (this.dates.some((date) => date.id === targetId)) {
+			this.handleDateChange(targetId);
+			return;
+		}
+
 		this.dates = this.buildDateItems(target);
-
-		if (this.isAnimating || targetId === this.activeDateId) {
-			return;
-		}
-
-		const currentIndex = this.dates.findIndex((date) => date.id === this.activeDateId);
-		const targetIndex = this.dates.findIndex((date) => date.id === targetId);
-		if (targetIndex === -1) return;
-
-		if (!this.shouldUsePageFlip()) {
-			this.previousDateId = this.activeDateId;
-			this.activeDateId = targetId;
-			this.pendingDateId = null;
-			this.isAnimating = false;
-			void this.render();
-			return;
-		}
-
-		this.direction = targetIndex > currentIndex ? "next" : "prev";
-		this.previousDateId = this.activeDateId;
-		if (this.direction === "next") {
-			this.pendingDateId = null;
-			this.activeDateId = targetId;
-		} else {
-			this.pendingDateId = targetId;
-		}
-		this.isAnimating = true;
+		this.activeDateId = targetId;
 		void this.render();
 	}
 
@@ -679,22 +1015,6 @@ export class DiaryView extends ItemView {
 		return withoutHeading.trim();
 	}
 
-	private renderSpineRing(parentEl: HTMLElement, top: string, index: number): void {
-		const ringEl = parentEl.createDiv({ cls: `diary-spine-ring is-ring-${index + 1}` });
-		ringEl.style.top = top;
-		ringEl.innerHTML = `
-			<svg width="40" height="16" viewBox="0 0 40 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-				<circle cx="8" cy="8" r="3.5" class="diary-ring-hole" />
-				<circle cx="8" cy="8" r="2.5" class="diary-ring-core" />
-				<circle cx="32" cy="8" r="3.5" class="diary-ring-hole" />
-				<circle cx="32" cy="8" r="2.5" class="diary-ring-core" />
-				<path d="M 6 8.5 C 14 1, 26 1, 34 8.5" class="diary-ring-metal diary-ring-metal-main" />
-				<path d="M 6 8 C 14 1, 26 1, 34 8" class="diary-ring-metal diary-ring-metal-highlight" />
-				<path d="M 6 9 C 14 2, 26 2, 34 9" class="diary-ring-metal diary-ring-metal-shadow" />
-			</svg>
-		`;
-	}
-
 	private renderMobileSpineRing(parentEl: HTMLElement, offset: number): void {
 		const ringEl = parentEl.createDiv({ cls: "diary-mobile-spine-ring" });
 		ringEl.style.setProperty("--diary-mobile-ring-offset", `${offset}px`);
@@ -712,41 +1032,21 @@ export class DiaryView extends ItemView {
 	}
 
 	private handleDateChange(nextDateId: string): void {
-		if (this.isAnimating || nextDateId === this.activeDateId) {
+		if (nextDateId === this.activeDateId) {
 			return;
 		}
 
-		const currentIndex = this.dates.findIndex((date) => date.id === this.activeDateId);
-		const nextIndex = this.dates.findIndex((date) => date.id === nextDateId);
-		const nextDate = this.dates[nextIndex];
-		if (!nextDate) {
+		if (this.shouldUsePageFlip()) {
+			this.turnToDate(nextDateId);
 			return;
 		}
 
-		if (!this.shouldUsePageFlip()) {
-			this.previousDateId = this.activeDateId;
-			this.activeDateId = nextDateId;
-			this.pendingDateId = null;
-			this.isAnimating = false;
-			void this.render();
-			return;
-		}
-
-		this.direction = nextIndex > currentIndex ? "next" : "prev";
-		this.previousDateId = this.activeDateId;
-		if (this.direction === "next") {
-			this.pendingDateId = null;
-			this.activeDateId = nextDateId;
-		} else {
-			this.pendingDateId = nextDateId;
-		}
-		this.isAnimating = true;
-
+		this.activeDateId = nextDateId;
 		void this.render();
 	}
 
 	private shouldUsePageFlip(): boolean {
-		return window.matchMedia("(min-width: 960px)").matches;
+		return window.matchMedia(DESKTOP_BREAKPOINT_QUERY).matches;
 	}
 
 	private async openDailyNote(path: string): Promise<void> {
