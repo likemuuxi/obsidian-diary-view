@@ -49,6 +49,10 @@ interface DiaryPageContent {
 	weatherIcon: string;
 }
 
+type TurnBook = {
+	turn: (...args: unknown[]) => unknown;
+};
+
 export class DiaryView extends ItemView {
 	private plugin: DiaryViewPlugin;
 	private dates: DiaryDateItem[] = [];
@@ -232,6 +236,13 @@ export class DiaryView extends ItemView {
 			return;
 		}
 
+		const turnBook = this.getTurnBook();
+		if (!turnBook) {
+			this.usingTurnBook = false;
+			void this.render();
+			return;
+		}
+
 		const width = this.turnViewportEl.clientWidth;
 		const height = this.turnViewportEl.clientHeight;
 		if (!width || !height) {
@@ -239,11 +250,8 @@ export class DiaryView extends ItemView {
 			return;
 		}
 
-		const $turnBook = $(this.turnBookEl) as {
-			turn: (...args: unknown[]) => unknown;
-		};
 		const activeTurnPage = this.getTurnPageForDate(this.activeDateId) ?? 2;
-		$turnBook.turn({
+		turnBook.turn({
 			width,
 			height,
 			display: "double",
@@ -304,7 +312,7 @@ export class DiaryView extends ItemView {
 				return;
 			}
 
-			($(this.turnBookEl) as { turn: (...args: unknown[]) => unknown }).turn("size", width, height);
+			this.getTurnBook()?.turn("size", width, height);
 		});
 	}
 
@@ -508,7 +516,7 @@ export class DiaryView extends ItemView {
 			return;
 		}
 
-		($(this.turnBookEl) as { turn: (...args: unknown[]) => unknown }).turn(direction === "next" ? "next" : "previous");
+		this.getTurnBook()?.turn(direction === "next" ? "next" : "previous");
 	}
 
 	private turnToDate(nextDateId: string): void {
@@ -518,7 +526,7 @@ export class DiaryView extends ItemView {
 		}
 
 		if (this.turnBookEl && this.turnBookReady) {
-			($(this.turnBookEl) as { turn: (...args: unknown[]) => unknown }).turn("page", nextTurnPage);
+			this.getTurnBook()?.turn("page", nextTurnPage);
 			return;
 		}
 
@@ -1047,7 +1055,21 @@ export class DiaryView extends ItemView {
 	}
 
 	private shouldUsePageFlip(): boolean {
-		return window.matchMedia(DESKTOP_BREAKPOINT_QUERY).matches;
+		return window.matchMedia(DESKTOP_BREAKPOINT_QUERY).matches && this.isTurnPluginAvailable();
+	}
+
+	private getTurnBook(): TurnBook | null {
+		if (!this.turnBookEl) {
+			return null;
+		}
+
+		const turnBook = $(this.turnBookEl) as Partial<TurnBook>;
+		return typeof turnBook.turn === "function" ? turnBook as TurnBook : null;
+	}
+
+	private isTurnPluginAvailable(): boolean {
+		const turnProbe = $(document.createElement("div")) as Partial<TurnBook>;
+		return typeof turnProbe.turn === "function";
 	}
 
 	private getDailyQuoteFrontmatterKey(): string {

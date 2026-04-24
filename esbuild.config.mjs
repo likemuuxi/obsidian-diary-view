@@ -17,6 +17,11 @@ const context = await esbuild.context({
 	},
 	entryPoints: ["src/main.ts"],
 	bundle: true,
+	alias: {
+		// turn.js patches jQuery as a plugin. Keep every "jquery" import on one module instance
+		// so $.fn.turn is available on the jQuery object used by DiaryView.
+		jquery: "./node_modules/jquery/dist/jquery.js",
+	},
 	external: [
 		"obsidian",
 		"electron",
