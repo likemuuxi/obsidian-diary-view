@@ -11,9 +11,9 @@ Diary View is an Obsidian community plugin that turns your daily notes into a no
 - Open a dedicated diary view from the ribbon icon or the `Open diary view` command.
 - Browse the latest seven daily notes with a page-like layout and flip animation.
 - Preview rendered Markdown or switch to editing without leaving the diary view.
-- Edit the prompt text at the top of the right page. The text is saved to frontmatter as `daily-quote`.
-- Optionally fetch a daily quote from a user-configured API. The plugin requests it only when a note does not already have `daily-quote`, then caches it in frontmatter.
-- Customize the weather icon for a note from frontmatter with `daily-weather`.
+- Edit the prompt text at the top of the right page. The text is saved to frontmatter as `daily-quote` by default.
+- Optionally fetch a daily quote from a user-configured API. The plugin requests it only when a note does not already have the configured quote property, then caches it in frontmatter.
+- Customize the weather icon for a note from frontmatter with `daily-weather` by default.
 - Replace the default artwork with a note-specific image from frontmatter with `daily-image`.
 - Preserve daily note frontmatter while editing the body content.
 
@@ -29,9 +29,9 @@ daily-image: "https://example.com/photo.jpg"
 ---
 ```
 
-`daily-quote` is shown in the prompt card and can be edited directly from the diary view. Clearing the prompt keeps an empty `daily-quote` value, so an API quote will not overwrite your manual choice on the next render.
+`daily-quote` is shown in the prompt card and can be edited directly from the diary view. Clearing the prompt keeps an empty `daily-quote` value, so an API quote will not overwrite your manual choice on the next render. The quote property name can be changed in settings.
 
-`daily-weather` can be an Obsidian/Lucide icon name such as `sun`, `cloud`, `cloud-rain`, `cloud-snow`, or `wind`. Common weather words such as `clear`, `cloudy`, `rain`, `snow`, `storm`, `晴`, `多云`, `雨`, and `雪` are also mapped to matching icons.
+`daily-weather` can be an Obsidian/Lucide icon name such as `sun`, `cloud`, `cloud-rain`, `cloud-snow`, or `wind`. Common weather words such as `clear`, `cloudy`, `rain`, `snow`, `storm`, `晴`, `多云`, `雨`, and `雪` are also mapped to matching icons. The weather property name can be changed in settings.
 
 `daily-image` replaces the default illustration on the left page. If it is empty or missing, Diary View keeps the built-in artwork.
 
@@ -40,6 +40,8 @@ daily-image: "https://example.com/photo.jpg"
 Open **Settings -> Community plugins -> Diary View** to configure:
 
 - **Daily quote API**: Optional URL for a daily quote endpoint. The response can be plain text or JSON using common fields such as `hitokoto`, `quote`, `content`, `text`, `sentence`, `message`, or `data`.
+- **Quote frontmatter key**: Frontmatter property used to read and save the daily quote. Defaults to `daily-quote`.
+- **Weather frontmatter key**: Frontmatter property used to read the daily weather icon. Defaults to `daily-weather`.
 
 The plugin works offline by default. It only makes network requests when you add a Daily quote API URL.
 

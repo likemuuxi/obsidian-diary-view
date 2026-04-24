@@ -3,12 +3,16 @@ import type DiaryViewPlugin from "./main";
 
 export interface DiaryViewSettings {
 	dailyQuoteApiUrl: string;
+	dailyQuoteFrontmatterKey: string;
+	dailyWeatherFrontmatterKey: string;
 	dailyImageFrontmatterKey: string;
 	dailyNoteHeading: string;
 }
 
 export const DEFAULT_SETTINGS: DiaryViewSettings = {
 	dailyQuoteApiUrl: "",
+	dailyQuoteFrontmatterKey: "daily-quote",
+	dailyWeatherFrontmatterKey: "daily-weather",
 	dailyImageFrontmatterKey: "daily-image",
 	dailyNoteHeading: "",
 };
@@ -28,7 +32,7 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Daily quote API")
-			.setDesc("Optional. The diary view requests this URL once per daily note, then caches the quote in frontmatter as daily-quote.")
+			.setDesc("Optional. The diary view requests this URL once per daily note, then caches the quote in frontmatter.")
 			.addText((text) => {
 				text.inputEl.type = "url";
 				text
@@ -37,6 +41,36 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.dailyQuoteApiUrl = value.trim();
 						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName("Quote frontmatter key")
+			.setDesc("Frontmatter property used to read and save the daily quote.")
+			.addText((text) => {
+				text
+					.setPlaceholder("daily-quote")
+					.setValue(this.plugin.settings.dailyQuoteFrontmatterKey)
+					.onChange(async (value) => {
+						const nextValue = value.trim() || DEFAULT_SETTINGS.dailyQuoteFrontmatterKey;
+						this.plugin.settings.dailyQuoteFrontmatterKey = nextValue;
+						await this.plugin.saveSettings();
+						await this.plugin.refreshAllDiaryViews();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName("Weather frontmatter key")
+			.setDesc("Frontmatter property used to read the daily weather icon.")
+			.addText((text) => {
+				text
+					.setPlaceholder("daily-weather")
+					.setValue(this.plugin.settings.dailyWeatherFrontmatterKey)
+					.onChange(async (value) => {
+						const nextValue = value.trim() || DEFAULT_SETTINGS.dailyWeatherFrontmatterKey;
+						this.plugin.settings.dailyWeatherFrontmatterKey = nextValue;
+						await this.plugin.saveSettings();
+						await this.plugin.refreshAllDiaryViews();
 					});
 			});
 

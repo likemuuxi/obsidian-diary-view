@@ -3,8 +3,9 @@ import $ from "jquery";
 import "turn.js";
 import type DiaryViewPlugin from "../main";
 import {
-	DAILY_QUOTE_FRONTMATTER_KEY,
 	DEFAULT_DAILY_IMAGE_FRONTMATTER_KEY,
+	DEFAULT_DAILY_QUOTE_FRONTMATTER_KEY,
+	DEFAULT_DAILY_WEATHER_FRONTMATTER_KEY,
 	readArtworkImage,
 	readBodyUnderHeading,
 	readDailyQuote,
@@ -1049,6 +1050,14 @@ export class DiaryView extends ItemView {
 		return window.matchMedia(DESKTOP_BREAKPOINT_QUERY).matches;
 	}
 
+	private getDailyQuoteFrontmatterKey(): string {
+		return this.plugin.settings.dailyQuoteFrontmatterKey?.trim() || DEFAULT_DAILY_QUOTE_FRONTMATTER_KEY;
+	}
+
+	private getDailyWeatherFrontmatterKey(): string {
+		return this.plugin.settings.dailyWeatherFrontmatterKey?.trim() || DEFAULT_DAILY_WEATHER_FRONTMATTER_KEY;
+	}
+
 	private async openDailyNote(path: string): Promise<void> {
 		let file = this.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) {
@@ -1088,7 +1097,9 @@ export class DiaryView extends ItemView {
 		const markdown = readBodyUnderHeading(body, this.plugin.settings.dailyNoteHeading);
 		const wordCount = this.countWords(markdown);
 		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
-		const dailyQuote = readDailyQuote(frontmatter) ?? await this.fetchAndCacheDailyQuote(file);
+		const quoteFrontmatterKey = this.getDailyQuoteFrontmatterKey();
+		const weatherFrontmatterKey = this.getDailyWeatherFrontmatterKey();
+		const dailyQuote = readDailyQuote(frontmatter, quoteFrontmatterKey) ?? await this.fetchAndCacheDailyQuote(file);
 		const imageFrontmatterKey = this.plugin.settings.dailyImageFrontmatterKey || DEFAULT_DAILY_IMAGE_FRONTMATTER_KEY;
 		return {
 			imageCaption: file.basename,
@@ -1103,7 +1114,7 @@ export class DiaryView extends ItemView {
 			markdown,
 			wordCount,
 			exists: true,
-			weatherIcon: this.resolveWeatherIcon(readWeatherIcon(frontmatter)),
+			weatherIcon: this.resolveWeatherIcon(readWeatherIcon(frontmatter, weatherFrontmatterKey)),
 		};
 	}
 
@@ -1145,7 +1156,7 @@ export class DiaryView extends ItemView {
 				try {
 					this.plugin.suppressVaultRefresh(file.path, 1000);
 					await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
-						frontmatter[DAILY_QUOTE_FRONTMATTER_KEY] = quote;
+						frontmatter[this.getDailyQuoteFrontmatterKey()] = quote;
 					});
 				} catch (error) {
 					console.warn("Failed to cache daily quote in frontmatter", error);
@@ -1452,7 +1463,7 @@ export class DiaryView extends ItemView {
 		try {
 			this.plugin.suppressVaultRefresh(path, 1000);
 			await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
-				frontmatter[DAILY_QUOTE_FRONTMATTER_KEY] = normalizedPromptText;
+				frontmatter[this.getDailyQuoteFrontmatterKey()] = normalizedPromptText;
 			});
 			this.promptDrafts.set(path, normalizedPromptText);
 		} catch (error) {
