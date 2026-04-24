@@ -997,6 +997,50 @@
 	pointer-events: none;
 }
 
+.diary-ring-hole {
+	fill: #e2e8f0;
+}
+
+.theme-dark .diary-ring-hole {
+	fill: #0a0a0a;
+}
+
+.diary-ring-core {
+	fill: #000000;
+}
+
+.diary-ring-metal {
+	fill: none;
+	stroke-linecap: round;
+}
+
+.diary-ring-metal-main {
+	stroke: #cbd5e1;
+	stroke-width: 4.5;
+}
+
+.theme-dark .diary-ring-metal-main {
+	stroke: #e5e7eb;
+}
+
+.diary-ring-metal-highlight {
+	stroke: rgba(255, 255, 255, 0.82);
+	stroke-width: 2;
+}
+
+.theme-dark .diary-ring-metal-highlight {
+	stroke: rgba(255, 255, 255, 0.9);
+}
+
+.diary-ring-metal-shadow {
+	stroke: rgba(0, 0, 0, 0.4);
+	stroke-width: 1;
+}
+
+.theme-dark .diary-ring-metal-shadow {
+	stroke: rgba(0, 0, 0, 0.8);
+}
+
 .diary-page-binding {
 	position: absolute;
 	top: 20px;
@@ -1237,6 +1281,10 @@
 	.diary-mobile-spine-ring svg {
 		transform: rotate(90deg);
 		transform-origin: center;
+	}
+
+	.diary-base-page .diary-page-binding {
+		display: none;
 	}
 
 	.theme-dark .diary-base-page,
