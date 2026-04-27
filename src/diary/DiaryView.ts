@@ -291,6 +291,8 @@ export class DiaryView extends ItemView {
 						event.preventDefault();
 						return;
 					}
+					// Clear visual active marker during animation
+					this.updateCalendarActiveState(null);
 				},
 				turned: (_event: unknown, page: number) => {
 					this.hideTurnDragFills();
@@ -580,9 +582,10 @@ export class DiaryView extends ItemView {
 		return 2;
 	}
 
-	private updateCalendarActiveState(): void {
+	private updateCalendarActiveState(overrideDateId?: string | null): void {
+		const targetId = overrideDateId !== undefined ? overrideDateId : this.activeDateId;
 		for (const itemEl of Array.from(this.contentEl.querySelectorAll<HTMLElement>(".diary-calendar-item[data-date-id]"))) {
-			itemEl.toggleClass("is-active", itemEl.dataset.dateId === this.activeDateId);
+			itemEl.toggleClass("is-active", targetId !== null && itemEl.dataset.dateId === targetId);
 		}
 	}
 
@@ -598,6 +601,7 @@ export class DiaryView extends ItemView {
 		const headerEl = pageEl.createDiv({ cls: "diary-page-header" });
 		const dayInfoEl = headerEl.createDiv({ cls: "diary-day-info diary-weather-trigger" });
 		const sunEl = dayInfoEl.createDiv({ cls: "diary-day-icon" });
+		sunEl.dataset.filePath = content.filePath;
 		setIcon(sunEl, content.weatherIcon);
 		const dayTextEl = dayInfoEl.createDiv({ cls: "diary-day-text" });
 		dayTextEl.createSpan({ cls: "diary-day-name", text: dateInfo.fullDay });
@@ -650,6 +654,7 @@ export class DiaryView extends ItemView {
 
 		const moodWrapEl = artworkWrapEl.createDiv({ cls: "diary-mood-wrap" });
 		const moodTriggerEl = moodWrapEl.createDiv({ cls: "diary-mood-trigger" });
+		moodTriggerEl.dataset.filePath = content.filePath;
 		if (content.moodIconName) {
 			moodTriggerEl.addClass("has-mood");
 			const moodIconEl = moodTriggerEl.createDiv({ cls: "diary-mood-icon" });
@@ -1074,7 +1079,7 @@ export class DiaryView extends ItemView {
 	}
 
 	private updateWeatherIcons(filePath: string, iconName: string): void {
-		const iconEls = Array.from(this.contentEl.querySelectorAll<HTMLElement>(".diary-day-icon"));
+		const iconEls = Array.from(this.contentEl.querySelectorAll<HTMLElement>(`.diary-day-icon[data-file-path="${CSS.escape(filePath)}"]`));
 		for (const iconEl of iconEls) {
 			setIcon(iconEl, iconName);
 		}
@@ -1234,7 +1239,7 @@ export class DiaryView extends ItemView {
 	}
 
 	private updateMoodDisplay(filePath: string, iconName: string | null, description: string | null): void {
-		const moodTriggers = Array.from(this.contentEl.querySelectorAll<HTMLElement>(".diary-mood-trigger"));
+		const moodTriggers = Array.from(this.contentEl.querySelectorAll<HTMLElement>(`.diary-mood-trigger[data-file-path="${CSS.escape(filePath)}"]`));
 		const match = iconName ? this.resolveMoodIcon(iconName) : null;
 		for (const triggerEl of moodTriggers) {
 			triggerEl.empty();
