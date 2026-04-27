@@ -1,4 +1,4 @@
-import { ItemView, MarkdownRenderer, moment, normalizePath, requestUrl, setIcon, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { ItemView, MarkdownRenderer, moment, normalizePath, Notice, requestUrl, setIcon, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import $ from "jquery";
 import "turn.js";
 import type DiaryViewPlugin from "../main";
@@ -14,6 +14,15 @@ import {
 	writeBodyUnderHeading,
 } from "./frontmatter";
 import { VIEW_TYPE_DIARY } from "../types";
+import {
+	applyWikilinkSuggestion,
+	createBlockId,
+	expandEmptyAnchorToCurrentFile,
+	getWikilinkSuggestions,
+	parseWikilinkContext,
+	type WikilinkContext,
+	type WikilinkSuggestion,
+} from "./wikilink";
 
 const AUTOSAVE_DELAY_MS = 1500;
 const DESKTOP_BREAKPOINT_QUERY = "(min-width: 960px)";
@@ -64,6 +73,7 @@ export class DiaryView extends ItemView {
 	private promptDrafts = new Map<string, string>();
 	private renderVersion = 0;
 	private pendingQuoteRequests = new Map<string, Promise<string | null>>();
+	private renderedContentByPath = new Map<string, DiaryPageContent>();
 	private datePickerOpen = false;
 	private datePickerMonth = new Date().getMonth();
 	private datePickerYear = new Date().getFullYear();
@@ -149,6 +159,7 @@ export class DiaryView extends ItemView {
 			return;
 		}
 
+		this.renderedContentByPath = new Map(Array.from(contentById.values()).map((content) => [content.filePath, content]));
 		this.usingTurnBook = useTurnBook;
 		if (useTurnBook) {
 			await this.renderDesktopTurnBook(contentById);
@@ -640,11 +651,12 @@ export class DiaryView extends ItemView {
 	}
 
 	private async renderRightPage(parentEl: HTMLElement, content: DiaryPageContent, isBackFace = false): Promise<void> {
+		this.renderedContentByPath.set(content.filePath, content);
 		const pageEl = parentEl.createDiv({
 			cls: `diary-page diary-page-right${isBackFace ? " is-backface" : ""}`,
 		});
+		pageEl.dataset.filePath = content.filePath;
 		this.renderPageBindingMarks(pageEl, "left");
-		const currentMarkdown = this.drafts.get(content.filePath) ?? content.markdown;
 		const isPreview = this.isMarkdownPreview && !isBackFace;
 
 		const promptCardEl = pageEl.createDiv({ cls: "diary-prompt-card" });
@@ -655,13 +667,15 @@ export class DiaryView extends ItemView {
 		promptLabelEl.createSpan({ text: content.promptTitle });
 		promptMetaEl.createSpan({ cls: "diary-prompt-time", text: content.time });
 
-		const promptTextEl = promptCardEl.createEl("textarea", {
+		const promptEditorWrapEl = promptCardEl.createDiv({ cls: "diary-prompt-editor-wrap" });
+		const promptTextEl = promptEditorWrapEl.createEl("textarea", {
 			cls: "diary-prompt-text",
 			attr: {
 				placeholder: content.promptPlaceholder,
 				"aria-label": `Edit daily quote for ${content.filePath}`,
 			},
 		});
+		const promptWikilinkSuggestEl = promptEditorWrapEl.createDiv({ cls: "diary-wikilink-suggest", attr: { hidden: "hidden" } });
 		promptTextEl.value = this.promptDrafts.get(content.filePath) ?? content.promptText;
 		promptTextEl.readOnly = isBackFace;
 		this.resizePromptTextarea(promptTextEl);
@@ -673,6 +687,11 @@ export class DiaryView extends ItemView {
 			});
 			promptTextEl.addEventListener("blur", () => {
 				void this.flushPendingPromptSave(content.filePath);
+			});
+			this.bindTextareaWikilinkSuggest(promptTextEl, promptWikilinkSuggestEl, content.filePath, (value) => {
+				this.promptDrafts.set(content.filePath, value);
+				this.scheduleDailyPromptSave(content.filePath, value);
+				this.resizePromptTextarea(promptTextEl);
 			});
 		}
 
@@ -707,67 +726,120 @@ export class DiaryView extends ItemView {
 
 		const previewButtonEl = this.renderPromptAction(
 			intentionActionsEl,
-			isPreview ? "pencil" : "eye",
-			isPreview ? "Switch to editing" : "Preview Markdown",
+			"eye",
+			"Preview Markdown",
 		);
-		previewButtonEl.addClass("diary-preview-toggle", "is-toggle");
-		previewButtonEl.toggleClass("is-active", isPreview);
+		previewButtonEl.addClass("diary-preview-toggle", "is-toggle", "diary-preview-mode-button");
+		this.updatePreviewToggleButton(previewButtonEl, isPreview);
 		if (!isBackFace) {
 			previewButtonEl.addEventListener("click", () => {
-				this.isMarkdownPreview = !this.isMarkdownPreview;
-				void this.render();
+				void this.updateMarkdownPreviewMode(!this.isMarkdownPreview);
 			});
 		} else {
 			previewButtonEl.disabled = true;
 		}
 
 		const linedPaperEl = intentionWrapEl.createDiv({ cls: "diary-lined-paper" });
-		let footerCountEl: HTMLElement;
-		if (isPreview) {
-			const previewEl = linedPaperEl.createDiv({ cls: "diary-markdown-preview markdown-rendered" });
-			if (!isBackFace) {
-				previewEl.addEventListener("dblclick", () => {
-					this.isMarkdownPreview = false;
-					void this.render();
-				});
+		const footerEl = pageEl.createDiv({ cls: "diary-page-footer" });
+		const footerLabelEl = footerEl.createDiv({ cls: "diary-page-footer-label" });
+		const targetEl = footerLabelEl.createDiv({ cls: "diary-page-footer-icon" });
+		setIcon(targetEl, "folder-open");
+		footerLabelEl.createSpan({ text: content.filePath });
+		const footerCountEl = footerEl.createSpan({
+			cls: "diary-page-footer-count",
+		});
+		await this.renderMarkdownEditorBody(linedPaperEl, footerCountEl, content, isBackFace);
+	}
+
+	private async updateMarkdownPreviewMode(isPreview: boolean): Promise<void> {
+		if (this.isMarkdownPreview === isPreview) {
+			return;
+		}
+
+		this.isMarkdownPreview = isPreview;
+		const renderVersion = this.renderVersion;
+		const pageEls = Array.from(this.contentEl.querySelectorAll<HTMLElement>(".diary-page-right"));
+		await Promise.all(pageEls.map(async (pageEl) => {
+			if (renderVersion !== this.renderVersion || pageEl.hasClass("is-backface")) {
+				return;
 			}
+
+			const filePath = pageEl.dataset.filePath;
+			const content = filePath ? this.renderedContentByPath.get(filePath) : undefined;
+			const linedPaperEl = pageEl.querySelector<HTMLElement>(".diary-lined-paper");
+			const footerCountEl = pageEl.querySelector<HTMLElement>(".diary-page-footer-count");
+			const previewButtonEl = pageEl.querySelector<HTMLButtonElement>(".diary-preview-mode-button");
+			if (!content || !linedPaperEl || !footerCountEl) {
+				return;
+			}
+
+			if (previewButtonEl) {
+				this.updatePreviewToggleButton(previewButtonEl, isPreview);
+			}
+			await this.renderMarkdownEditorBody(linedPaperEl, footerCountEl, content, false);
+		}));
+	}
+
+	private async renderMarkdownEditorBody(
+		linedPaperEl: HTMLElement,
+		footerCountEl: HTMLElement,
+		content: DiaryPageContent,
+		isBackFace: boolean,
+	): Promise<void> {
+		linedPaperEl.empty();
+		const currentMarkdown = this.drafts.get(content.filePath) ?? content.markdown;
+		this.updateFooterWordCount(footerCountEl, currentMarkdown);
+
+		if (this.isMarkdownPreview && !isBackFace) {
+			const previewEl = linedPaperEl.createDiv({ cls: "diary-markdown-preview markdown-rendered" });
+			previewEl.addEventListener("dblclick", () => {
+				void this.updateMarkdownPreviewMode(false);
+			});
 			if (currentMarkdown.trim()) {
 				await MarkdownRenderer.render(this.app, currentMarkdown, previewEl, content.filePath, this);
 				this.bindMarkdownLinks(previewEl, content.filePath);
 			} else {
 				previewEl.createDiv({ cls: "diary-note-empty", text: "There is no content to preview yet." });
 			}
-		} else {
-			const textareaEl = linedPaperEl.createEl("textarea", {
-				cls: "diary-intention-textarea",
-				attr: {
-					placeholder: "Write this daily note...",
-					"aria-label": `Edit daily note ${content.filePath}`,
-				},
-			});
-			textareaEl.value = currentMarkdown;
-			textareaEl.readOnly = isBackFace;
-			if (!isBackFace) {
-				textareaEl.addEventListener("input", () => {
-					this.drafts.set(content.filePath, textareaEl.value);
-					this.scheduleDailyNoteSave(content.filePath, textareaEl.value);
-					this.updateFooterWordCount(footerCountEl, textareaEl.value);
-				});
-				textareaEl.addEventListener("blur", () => {
-					void this.flushPendingNoteSave(content.filePath);
-				});
-			}
+			return;
 		}
 
-		const footerEl = pageEl.createDiv({ cls: "diary-page-footer" });
-		const footerLabelEl = footerEl.createDiv({ cls: "diary-page-footer-label" });
-		const targetEl = footerLabelEl.createDiv({ cls: "diary-page-footer-icon" });
-		setIcon(targetEl, "folder-open");
-		footerLabelEl.createSpan({ text: content.filePath });
-		footerCountEl = footerEl.createSpan({
-			cls: "diary-page-footer-count",
-			text: this.formatWordCount(this.countWords(currentMarkdown)),
+		const editorWrapEl = linedPaperEl.createDiv({ cls: "diary-intention-editor-wrap" });
+		const textareaEl = editorWrapEl.createEl("textarea", {
+			cls: "diary-intention-textarea",
+			attr: {
+				placeholder: "Write this daily note...",
+				"aria-label": `Edit daily note ${content.filePath}`,
+			},
 		});
+		const wikilinkSuggestEl = editorWrapEl.createDiv({ cls: "diary-wikilink-suggest", attr: { hidden: "hidden" } });
+		textareaEl.value = currentMarkdown;
+		textareaEl.readOnly = isBackFace;
+		if (isBackFace) {
+			return;
+		}
+
+		textareaEl.addEventListener("input", () => {
+			this.drafts.set(content.filePath, textareaEl.value);
+			this.scheduleDailyNoteSave(content.filePath, textareaEl.value);
+			this.updateFooterWordCount(footerCountEl, textareaEl.value);
+		});
+		textareaEl.addEventListener("blur", () => {
+			void this.flushPendingNoteSave(content.filePath);
+		});
+		this.bindTextareaWikilinkSuggest(textareaEl, wikilinkSuggestEl, content.filePath, (value) => {
+			this.drafts.set(content.filePath, value);
+			this.scheduleDailyNoteSave(content.filePath, value);
+			this.updateFooterWordCount(footerCountEl, value);
+		});
+	}
+
+	private updatePreviewToggleButton(buttonEl: HTMLButtonElement, isPreview: boolean): void {
+		const label = isPreview ? "Switch to editing" : "Preview Markdown";
+		buttonEl.setAttribute("aria-label", label);
+		buttonEl.setAttribute("title", label);
+		buttonEl.toggleClass("is-active", isPreview);
+		setIcon(buttonEl, isPreview ? "pencil" : "eye");
 	}
 
 	private renderPromptAction(parentEl: HTMLElement, icon: string, label: string): HTMLButtonElement {
@@ -1595,5 +1667,424 @@ export class DiaryView extends ItemView {
 				false,
 			);
 		});
+	}
+
+	private bindTextareaWikilinkSuggest(
+		textareaEl: HTMLTextAreaElement,
+		panelEl: HTMLElement,
+		sourcePath: string,
+		onChange: (value: string) => void,
+	): void {
+		let suggestions: WikilinkSuggestion[] = [];
+		let selectedIndex = 0;
+		let activeContext: WikilinkContext | null = null;
+		let lockedAnchorTargetPath: string | null = null;
+		let syncRequestId = 0;
+		let isComposing = false;
+
+		const hidePanel = (): void => {
+			suggestions = [];
+			selectedIndex = 0;
+			activeContext = null;
+			lockedAnchorTargetPath = null;
+			panelEl.empty();
+			panelEl.setAttr("hidden", "hidden");
+		};
+
+		const applySuggestion = async (item: WikilinkSuggestion): Promise<void> => {
+			const contextAtSelection = activeContext;
+			if (!contextAtSelection) {
+				hidePanel();
+				return;
+			}
+
+			if (item.type === "paragraph") {
+				const blockId = await this.ensureParagraphBlockId(item);
+				if (!blockId) {
+					hidePanel();
+					return;
+				}
+
+				const result = applyWikilinkSuggestion(
+					textareaEl.value,
+					contextAtSelection.matchEnd,
+					contextAtSelection,
+					{
+						type: "block",
+						file: item.file,
+						blockId,
+						displayText: `^${blockId}`,
+						path: item.path,
+					},
+				);
+				textareaEl.value = result.newText;
+				onChange(result.newText);
+				hidePanel();
+				textareaEl.focus();
+				textareaEl.setSelectionRange(result.newCursor, result.newCursor);
+				textareaEl.dispatchEvent(new Event("input", { bubbles: true }));
+				return;
+			}
+
+			const result = applyWikilinkSuggestion(
+				textareaEl.value,
+				contextAtSelection.matchEnd,
+				contextAtSelection,
+				item,
+			);
+			textareaEl.value = result.newText;
+			onChange(result.newText);
+			hidePanel();
+			textareaEl.focus();
+			textareaEl.setSelectionRange(result.newCursor, result.newCursor);
+			textareaEl.dispatchEvent(new Event("input", { bubbles: true }));
+		};
+
+		const applyAnchorTransition = (): void => {
+			if (!activeContext || !suggestions.length) {
+				return;
+			}
+
+			const selectedItem = suggestions[selectedIndex];
+			const targetFile = selectedItem?.file ?? null;
+			const baseName = targetFile?.basename ?? (activeContext.filePart.trim() || "");
+			if (!baseName) {
+				return;
+			}
+
+			lockedAnchorTargetPath = targetFile?.path ?? lockedAnchorTargetPath;
+
+			const before = textareaEl.value.slice(0, activeContext.matchStart);
+			const after = textareaEl.value.slice(activeContext.matchEnd);
+			const replacement = `[[${baseName}#`;
+			const nextValue = `${before}${replacement}${after}`;
+			const nextCursor = before.length + replacement.length;
+
+			textareaEl.value = nextValue;
+			onChange(nextValue);
+			textareaEl.focus();
+			textareaEl.setSelectionRange(nextCursor, nextCursor);
+			textareaEl.dispatchEvent(new Event("input", { bubbles: true }));
+		};
+
+		const renderPanel = (): void => {
+			panelEl.empty();
+			if (!suggestions.length) {
+				panelEl.setAttr("hidden", "hidden");
+				panelEl.style.removeProperty("left");
+				panelEl.style.removeProperty("top");
+				return;
+			}
+
+			panelEl.removeAttribute("hidden");
+			this.positionWikilinkSuggestPanel(textareaEl, panelEl);
+			suggestions.forEach((item, index) => {
+				const itemEl = panelEl.createEl("button", {
+					cls: `diary-wikilink-suggest-item${index === selectedIndex ? " is-selected" : ""}`,
+					attr: {
+						type: "button",
+						"aria-label": item.path,
+					},
+				});
+				itemEl.addEventListener("mousedown", (event) => {
+					event.preventDefault();
+					void applySuggestion(item);
+				});
+
+				const typeEl = itemEl.createSpan({ cls: "diary-wikilink-suggest-type" });
+				typeEl.setText(
+					item.type === "file"
+						? "File"
+						: item.type === "heading"
+							? "Heading"
+							: item.type === "paragraph"
+								? "Paragraph"
+								: "Block",
+				);
+
+				const contentEl = itemEl.createSpan({ cls: "diary-wikilink-suggest-content" });
+				contentEl.createSpan({
+					cls: "diary-wikilink-suggest-title",
+					text: item.displayText,
+				});
+				contentEl.createSpan({
+					cls: "diary-wikilink-suggest-path",
+					text: item.path,
+				});
+			});
+
+			const selectedItemEl = panelEl.querySelector(".diary-wikilink-suggest-item.is-selected");
+			if (selectedItemEl instanceof HTMLElement) {
+				selectedItemEl.scrollIntoView({
+					block: "nearest",
+				});
+			}
+		};
+
+		const syncPanel = async (): Promise<void> => {
+			const requestId = ++syncRequestId;
+			const cursor = textareaEl.selectionStart ?? textareaEl.value.length;
+			const context = parseWikilinkContext(textareaEl.value, cursor);
+			if (!context) {
+				hidePanel();
+				return;
+			}
+
+			if (!context.separator) {
+				lockedAnchorTargetPath = null;
+			} else if (lockedAnchorTargetPath) {
+				const lockedTargetFile = this.app.vault.getAbstractFileByPath(lockedAnchorTargetPath);
+				if (
+					!(lockedTargetFile instanceof TFile) ||
+					(context.filePart.trim() &&
+						context.filePart.trim() !== lockedTargetFile.basename &&
+						context.filePart.trim() !== lockedTargetFile.path)
+				) {
+					lockedAnchorTargetPath = null;
+				}
+			}
+
+			const normalizedContext = expandEmptyAnchorToCurrentFile(this.app, context, sourcePath);
+			const nextSuggestions = await getWikilinkSuggestions(
+				this.app,
+				normalizedContext,
+				sourcePath,
+				lockedAnchorTargetPath,
+			);
+			if (requestId !== syncRequestId) {
+				return;
+			}
+			if (!nextSuggestions.length) {
+				hidePanel();
+				return;
+			}
+
+			activeContext = context;
+			suggestions = nextSuggestions;
+			selectedIndex = Math.min(selectedIndex, suggestions.length - 1);
+			renderPanel();
+		};
+
+		textareaEl.addEventListener("compositionstart", () => {
+			isComposing = true;
+		});
+		textareaEl.addEventListener("compositionend", () => {
+			isComposing = false;
+			this.normalizeTextareaWikilinkInput(textareaEl, onChange);
+			void syncPanel();
+		});
+		textareaEl.addEventListener("input", () => {
+			if (!isComposing) {
+				this.normalizeTextareaWikilinkInput(textareaEl, onChange);
+			}
+			void syncPanel();
+		});
+		textareaEl.addEventListener("click", () => {
+			void syncPanel();
+		});
+		textareaEl.addEventListener("keyup", (event) => {
+			if (event.key === "ArrowUp" || event.key === "ArrowDown" || event.key === "Enter" || event.key === "Tab") {
+				return;
+			}
+			void syncPanel();
+		});
+		textareaEl.addEventListener("blur", () => {
+			window.setTimeout(() => {
+				if (document.activeElement === textareaEl) {
+					return;
+				}
+				hidePanel();
+			}, 80);
+		});
+		textareaEl.addEventListener("keydown", (event) => {
+			if (event.key === "Escape") {
+				event.preventDefault();
+				event.stopPropagation();
+				hidePanel();
+				return;
+			}
+
+			if (!suggestions.length) {
+				return;
+			}
+
+			if (event.key === "ArrowDown") {
+				event.preventDefault();
+				selectedIndex = (selectedIndex + 1) % suggestions.length;
+				renderPanel();
+				return;
+			}
+
+			if (event.key === "ArrowUp") {
+				event.preventDefault();
+				selectedIndex = (selectedIndex - 1 + suggestions.length) % suggestions.length;
+				renderPanel();
+				return;
+			}
+
+			if (this.isWikilinkAnchorShortcut(event) && activeContext?.separator === "") {
+				event.preventDefault();
+				applyAnchorTransition();
+				return;
+			}
+
+			if (event.key === "Enter" || event.key === "Tab") {
+				event.preventDefault();
+				const selectedSuggestion = suggestions[selectedIndex];
+				if (!selectedSuggestion) {
+					hidePanel();
+					return;
+				}
+				void applySuggestion(selectedSuggestion);
+				return;
+			}
+		});
+	}
+
+	private async ensureParagraphBlockId(
+		item: Extract<WikilinkSuggestion, { type: "paragraph" }>,
+	): Promise<string | null> {
+		const file = this.app.vault.getAbstractFileByPath(item.path);
+		if (!(file instanceof TFile)) {
+			new Notice("Source file no longer exists.");
+			return null;
+		}
+
+		const rawContent = (await this.app.vault.cachedRead(file)).replace(/\r\n/g, "\n");
+		if (item.appendOffset < 0 || item.appendOffset > rawContent.length) {
+			new Notice("Could not locate the selected paragraph.");
+			return null;
+		}
+
+		const existingIds = Object.keys(this.app.metadataCache.getFileCache(file)?.blocks ?? {});
+		const blockId = createBlockId(existingIds);
+		const nextContent = `${rawContent.slice(0, item.appendOffset)} ^${blockId}${rawContent.slice(item.appendOffset)}`;
+		this.plugin.suppressVaultRefresh(file.path);
+		await this.app.vault.modify(file, nextContent);
+		return blockId;
+	}
+
+	private isWikilinkAnchorShortcut(event: KeyboardEvent): boolean {
+		if (event.key === "#") {
+			return true;
+		}
+
+		if (event.shiftKey && event.code === "Digit3") {
+			return true;
+		}
+
+		return false;
+	}
+
+	private normalizeTextareaWikilinkInput(
+		textareaEl: HTMLTextAreaElement,
+		onChange: (value: string) => void,
+	): boolean {
+		const cursor = textareaEl.selectionStart ?? textareaEl.value.length;
+		let value = textareaEl.value;
+		let nextCursor = cursor;
+		let changed = false;
+
+		if (cursor >= 2 && value.slice(cursor - 2, cursor) === "【【") {
+			value = `${value.slice(0, cursor - 2)}[[${value.slice(cursor)}`;
+			changed = true;
+		}
+
+		if (cursor >= 3 && value.slice(cursor - 3, cursor) === "#……") {
+			value = `${value.slice(0, cursor - 3)}#^${value.slice(cursor)}`;
+			nextCursor -= 1;
+			changed = true;
+		}
+
+		if (!changed) {
+			return false;
+		}
+
+		textareaEl.value = value;
+		onChange(value);
+		textareaEl.setSelectionRange(nextCursor, nextCursor);
+		return true;
+	}
+
+	private positionWikilinkSuggestPanel(
+		textareaEl: HTMLTextAreaElement,
+		panelEl: HTMLElement,
+	): void {
+		const caretOffset = this.measureTextareaCaretOffset(textareaEl);
+		const horizontalPadding = 12;
+		const verticalGap = 8;
+		const maxPanelWidth = Math.min(420, Math.max(260, textareaEl.clientWidth - horizontalPadding * 2));
+		const panelWidth = Math.min(maxPanelWidth, textareaEl.clientWidth);
+		const maxLeft = Math.max(horizontalPadding, textareaEl.clientWidth - panelWidth);
+		const nextLeft = Math.min(Math.max(caretOffset.left, horizontalPadding), maxLeft);
+		const nextTop = Math.min(
+			Math.max(caretOffset.top + caretOffset.lineHeight + verticalGap, verticalGap),
+			Math.max(verticalGap, textareaEl.clientHeight - 16),
+		);
+
+		panelEl.style.width = `${panelWidth}px`;
+		panelEl.style.left = `${nextLeft}px`;
+		panelEl.style.top = `${nextTop}px`;
+	}
+
+	private measureTextareaCaretOffset(
+		textareaEl: HTMLTextAreaElement,
+	): { left: number; top: number; lineHeight: number } {
+		const mirrorEl = document.createElement("div");
+		const style = window.getComputedStyle(textareaEl);
+		const textareaRect = textareaEl.getBoundingClientRect();
+		const cursor = textareaEl.selectionStart ?? textareaEl.value.length;
+		const contentBeforeCursor = textareaEl.value.slice(0, cursor);
+		const contentAfterCursor = textareaEl.value.slice(cursor) || ".";
+
+		mirrorEl.style.position = "absolute";
+		mirrorEl.style.visibility = "hidden";
+		mirrorEl.style.pointerEvents = "none";
+		mirrorEl.style.whiteSpace = "pre-wrap";
+		mirrorEl.style.wordBreak = "break-word";
+		mirrorEl.style.overflowWrap = "anywhere";
+		mirrorEl.style.boxSizing = "border-box";
+		mirrorEl.style.left = "-9999px";
+		mirrorEl.style.top = "0";
+		mirrorEl.style.width = `${textareaRect.width}px`;
+		mirrorEl.style.font = style.font;
+		mirrorEl.style.fontFamily = style.fontFamily;
+		mirrorEl.style.fontFeatureSettings = style.fontFeatureSettings;
+		mirrorEl.style.fontKerning = style.fontKerning;
+		mirrorEl.style.fontSize = style.fontSize;
+		mirrorEl.style.fontStretch = style.fontStretch;
+		mirrorEl.style.fontStyle = style.fontStyle;
+		mirrorEl.style.fontVariant = style.fontVariant;
+		mirrorEl.style.fontWeight = style.fontWeight;
+		mirrorEl.style.letterSpacing = style.letterSpacing;
+		mirrorEl.style.lineHeight = style.lineHeight;
+		mirrorEl.style.padding = style.padding;
+		mirrorEl.style.border = style.border;
+
+		const beforeEl = document.createElement("span");
+		beforeEl.textContent = contentBeforeCursor;
+		mirrorEl.appendChild(beforeEl);
+
+		const caretEl = document.createElement("span");
+		caretEl.textContent = "\u200b";
+		mirrorEl.appendChild(caretEl);
+
+		const afterEl = document.createElement("span");
+		afterEl.textContent = contentAfterCursor;
+		mirrorEl.appendChild(afterEl);
+
+		document.body.appendChild(mirrorEl);
+
+		const lineHeight = Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.6 || 22;
+		const left = caretEl.offsetLeft - textareaEl.scrollLeft;
+		const top = caretEl.offsetTop - textareaEl.scrollTop;
+
+		mirrorEl.remove();
+
+		return {
+			left,
+			top,
+			lineHeight,
+		};
 	}
 }
