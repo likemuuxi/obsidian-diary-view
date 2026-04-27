@@ -6,11 +6,14 @@ import {
 	DEFAULT_DAILY_IMAGE_FRONTMATTER_KEY,
 	DEFAULT_DAILY_QUOTE_FRONTMATTER_KEY,
 	DEFAULT_DAILY_WEATHER_FRONTMATTER_KEY,
+	type DiarySection,
+	readAllBodyUnderHeadings,
 	readArtworkImage,
 	readBodyUnderHeading,
 	readDailyQuote,
 	readWeatherIcon,
 	splitFrontmatter,
+	writeAllBodyUnderHeadings,
 	writeBodyUnderHeading,
 } from "./frontmatter";
 import { VIEW_TYPE_DIARY } from "../types";
@@ -52,6 +55,7 @@ interface DiaryPageContent {
 	streak: string;
 	msg: string;
 	filePath: string;
+	sections: DiarySection[];
 	markdown: string;
 	wordCount: number;
 	exists: boolean;
@@ -796,16 +800,21 @@ export class DiaryView extends ItemView {
 		isBackFace: boolean,
 	): Promise<void> {
 		linedPaperEl.empty();
-		const currentMarkdown = this.drafts.get(content.filePath) ?? content.markdown;
-		this.updateFooterWordCount(footerCountEl, currentMarkdown);
+		const hasSections = content.sections.length > 0;
+		const fullMarkdown = this.drafts.has(content.filePath)
+			? this.drafts.get(content.filePath)!
+			: hasSections
+				? content.sections.map((s) => (s.heading ? `${s.heading}\n${s.content}` : s.content)).join("\n\n")
+				: "";
+		this.updateFooterWordCount(footerCountEl, fullMarkdown);
 
 		if (this.isMarkdownPreview && !isBackFace) {
 			const previewEl = linedPaperEl.createDiv({ cls: "diary-markdown-preview markdown-rendered" });
 			previewEl.addEventListener("dblclick", () => {
 				void this.updateMarkdownPreviewMode(false);
 			});
-			if (currentMarkdown.trim()) {
-				await MarkdownRenderer.render(this.app, currentMarkdown, previewEl, content.filePath, this);
+			if (fullMarkdown.trim()) {
+				await MarkdownRenderer.render(this.app, fullMarkdown, previewEl, content.filePath, this);
 				this.bindMarkdownLinks(previewEl, content.filePath);
 			} else {
 				previewEl.createDiv({ cls: "diary-note-empty", text: "There is no content to preview yet." });
@@ -822,7 +831,7 @@ export class DiaryView extends ItemView {
 			},
 		});
 		const wikilinkSuggestEl = editorWrapEl.createDiv({ cls: "diary-wikilink-suggest", attr: { hidden: "hidden" } });
-		textareaEl.value = currentMarkdown;
+		textareaEl.value = fullMarkdown;
 		textareaEl.readOnly = isBackFace;
 		if (isBackFace) {
 			return;
@@ -1370,7 +1379,8 @@ export class DiaryView extends ItemView {
 
 		const rawContent = (await this.app.vault.cachedRead(file)).replace(/\r\n/g, "\n");
 		const body = splitFrontmatter(rawContent).body;
-		const markdown = readBodyUnderHeading(body, this.plugin.settings.dailyNoteHeading);
+		const sections = readAllBodyUnderHeadings(body, this.plugin.settings.dailyNoteHeading);
+		const markdown = sections.map((s) => s.content).join("\n");
 		const wordCount = this.countWords(markdown);
 		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
 		const quoteFrontmatterKey = this.getDailyQuoteFrontmatterKey();
@@ -1388,6 +1398,7 @@ export class DiaryView extends ItemView {
 			streak: this.formatWordCount(wordCount),
 			msg: "Loaded from your Obsidian daily note.",
 			filePath: file.path,
+			sections,
 			markdown,
 			wordCount,
 			exists: true,
@@ -1407,6 +1418,7 @@ export class DiaryView extends ItemView {
 			streak: this.formatWordCount(0),
 			msg: "Create this daily note in Obsidian to fill the page.",
 			filePath: date.path,
+			sections: [],
 			markdown: "",
 			wordCount: 0,
 			exists: false,
@@ -1753,11 +1765,12 @@ export class DiaryView extends ItemView {
 
 	private async saveDailyNote(path: string, markdown: string): Promise<void> {
 		const normalizedMarkdown = markdown.replace(/\r\n/g, "\n").trimEnd();
+		const sections = this.parseSectionsFromMarkdown(normalizedMarkdown);
 		const file = this.app.vault.getAbstractFileByPath(path);
 		if (file instanceof TFile) {
 			const rawContent = (await this.app.vault.cachedRead(file)).replace(/\r\n/g, "\n");
 			const { frontmatter, body } = splitFrontmatter(rawContent);
-			const nextBody = writeBodyUnderHeading(body, this.plugin.settings.dailyNoteHeading, normalizedMarkdown);
+			const nextBody = writeAllBodyUnderHeadings(body, this.plugin.settings.dailyNoteHeading, sections);
 			const nextContent = frontmatter
 				? nextBody
 					? `${frontmatter}\n\n${nextBody}`
@@ -1767,11 +1780,55 @@ export class DiaryView extends ItemView {
 			await this.app.vault.modify(file, nextContent);
 		} else {
 			await this.ensureParentFolder(path);
-			const nextBody = writeBodyUnderHeading("", this.plugin.settings.dailyNoteHeading, normalizedMarkdown);
+			const nextBody = writeAllBodyUnderHeadings("", this.plugin.settings.dailyNoteHeading, sections);
 			this.plugin.suppressVaultRefresh(path);
 			await this.app.vault.create(path, nextBody);
 		}
 		this.drafts.set(path, normalizedMarkdown);
+	}
+
+	private parseSectionsFromMarkdown(markdown: string): DiarySection[] {
+		const headings = this.plugin.settings.dailyNoteHeading
+			.split(/[\n,;]+/)
+			.map((h) => h.trim())
+			.filter(Boolean);
+		if (headings.length === 0) {
+			return [{ heading: "", content: markdown }];
+		}
+
+		const headingPattern = /^(#{1,6})\s+(.+?)\s*#*\s*$/gm;
+		const matches: Array<{ line: string; index: number; title: string }> = [];
+		let m: RegExpExecArray | null;
+		while ((m = headingPattern.exec(markdown)) !== null) {
+			const title = (m[2] ?? "").trim().toLowerCase();
+			matches.push({ line: m[0], index: m.index, title });
+		}
+
+		const normalizedHeadings = headings.map((h) =>
+			h.replace(/^#{1,6}\s+/, "").trim().toLowerCase(),
+		);
+
+		const result: DiarySection[] = [];
+		for (let i = 0; i < headings.length; i++) {
+			const matchIdx = matches.findIndex((match) =>
+				normalizedHeadings[i] && match.title === normalizedHeadings[i],
+			);
+			if (matchIdx === -1) {
+				result.push({ heading: headings[i]!, content: "" });
+				continue;
+			}
+
+			const startMatch = matches[matchIdx];
+			const contentStart = startMatch!.index + startMatch!.line.length;
+			const nextMatch = matches[matchIdx + 1];
+			const contentEnd = nextMatch ? nextMatch.index : markdown.length;
+			const content = markdown.slice(contentStart, contentEnd).trim();
+
+			matches.splice(matchIdx, 1);
+			result.push({ heading: startMatch!.line, content });
+		}
+
+		return result;
 	}
 
 	private async flushPendingSaves(): Promise<void> {

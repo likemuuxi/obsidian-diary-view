@@ -72,6 +72,83 @@ export function readArtworkImage(frontmatter: unknown, key: string = DEFAULT_DAI
 	return readFrontmatterString(frontmatter, key);
 }
 
+export interface DiarySection {
+	heading: string;
+	content: string;
+}
+
+export function readAllBodyUnderHeadings(body: string, configuredHeading: string): DiarySection[] {
+	const headings = parseConfiguredHeadings(configuredHeading);
+	if (headings.length === 0) {
+		return [{ heading: "", content: body.trimEnd() }];
+	}
+
+	const allMatches = getHeadingMatches(body);
+	const result: DiarySection[] = [];
+
+	for (const configuredHeading of headings) {
+		const normalizedTitle = normalizeHeadingTitle(configuredHeading);
+		const match = allMatches.find((h) => normalizeHeadingTitle(h.title) === normalizedTitle);
+		if (match) {
+			result.push({
+				heading: match.headingLine,
+				content: body.slice(match.contentStart, match.end).trim(),
+			});
+		} else {
+			result.push({
+				heading: createHeadingLine(configuredHeading),
+				content: "",
+			});
+		}
+	}
+
+	return result;
+}
+
+export function writeAllBodyUnderHeadings(body: string, configuredHeading: string, sections: DiarySection[]): string {
+	const headings = parseConfiguredHeadings(configuredHeading);
+	if (headings.length === 0) {
+		return sections.map((s) => s.content).join("\n\n").trimEnd();
+	}
+
+	const allMatches = getHeadingMatches(body);
+	let nextBody = body;
+	const processedHeadings = new Set<string>();
+
+	for (let i = sections.length - 1; i >= 0; i--) {
+		const section = sections[i];
+		if (!section) continue;
+		const configuredTitle = headings[i];
+		if (!configuredTitle) continue;
+		const normalizedTitle = normalizeHeadingTitle(configuredTitle);
+		const match = allMatches.find((h) => normalizeHeadingTitle(h.title) === normalizedTitle);
+
+		if (match && !processedHeadings.has(normalizedTitle)) {
+			processedHeadings.add(normalizedTitle);
+			nextBody = joinHeadingSection(
+				nextBody.slice(0, match.start),
+				match.headingLine,
+				section.content.trimEnd(),
+				nextBody.slice(match.end),
+			);
+		}
+	}
+
+	if (processedHeadings.size === 0) {
+		let appended = nextBody.trim();
+		for (const section of sections) {
+			if (!section) continue;
+			const headingLine = section.heading;
+			const sectionContent = section.content.trimEnd();
+			const entry = sectionContent ? `${headingLine}\n${sectionContent}` : headingLine;
+			appended = appended ? `${appended}\n\n${entry}` : entry;
+		}
+		return appended;
+	}
+
+	return nextBody;
+}
+
 export function readBodyUnderHeading(body: string, configuredHeading: string): string {
 	const headings = parseConfiguredHeadings(configuredHeading);
 	if (headings.length === 0) {
