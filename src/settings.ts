@@ -7,6 +7,7 @@ export interface DiaryViewSettings {
 	dailyWeatherFrontmatterKey: string;
 	dailyImageFrontmatterKey: string;
 	dailyNoteHeading: string;
+	weatherLanguage: "en" | "zh";
 }
 
 export const DEFAULT_SETTINGS: DiaryViewSettings = {
@@ -15,6 +16,7 @@ export const DEFAULT_SETTINGS: DiaryViewSettings = {
 	dailyWeatherFrontmatterKey: "daily-weather",
 	dailyImageFrontmatterKey: "daily-image",
 	dailyNoteHeading: "",
+	weatherLanguage: "en",
 };
 
 export class DiaryViewSettingTab extends PluginSettingTab {
@@ -69,6 +71,21 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						const nextValue = value.trim() || DEFAULT_SETTINGS.dailyWeatherFrontmatterKey;
 						this.plugin.settings.dailyWeatherFrontmatterKey = nextValue;
+						await this.plugin.saveSettings();
+						await this.plugin.refreshAllDiaryViews();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName("Weather language")
+			.setDesc("Display language for the weather picker menu.")
+			.addDropdown((dropdown) => {
+				dropdown
+					.addOption("en", "English")
+					.addOption("zh", "中文")
+					.setValue(this.plugin.settings.weatherLanguage)
+					.onChange(async (value) => {
+						this.plugin.settings.weatherLanguage = value as "en" | "zh";
 						await this.plugin.saveSettings();
 						await this.plugin.refreshAllDiaryViews();
 					});

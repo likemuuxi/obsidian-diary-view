@@ -56,6 +56,7 @@ interface DiaryPageContent {
 	wordCount: number;
 	exists: boolean;
 	weatherIcon: string;
+	weatherValue: string | null;
 }
 
 type TurnBook = {
@@ -78,6 +79,8 @@ export class DiaryView extends ItemView {
 	private datePickerMonth = new Date().getMonth();
 	private datePickerYear = new Date().getFullYear();
 	private datePickerCleanup: (() => void) | null = null;
+	private weatherPickerOpen = false;
+	private weatherPickerCleanup: (() => void) | null = null;
 	private usingTurnBook = false;
 	private turnBookEl: HTMLElement | null = null;
 	private turnViewportEl: HTMLElement | null = null;
@@ -129,6 +132,7 @@ export class DiaryView extends ItemView {
 
 	async onClose(): Promise<void> {
 		this.closeDatePicker();
+		this.closeWeatherPicker();
 		this.turnResizeObserver?.disconnect();
 		this.turnResizeObserver = null;
 		if (this.turnResizeFrame !== null) {
@@ -149,6 +153,7 @@ export class DiaryView extends ItemView {
 
 	private async render(): Promise<void> {
 		this.closeDatePicker();
+		this.closeWeatherPicker();
 		const renderVersion = ++this.renderVersion;
 		const useTurnBook = this.shouldUsePageFlip();
 		const contentIds = useTurnBook
@@ -583,12 +588,16 @@ export class DiaryView extends ItemView {
 		this.renderPageBindingMarks(pageEl, "right");
 
 		const headerEl = pageEl.createDiv({ cls: "diary-page-header" });
-		const dayInfoEl = headerEl.createDiv({ cls: "diary-day-info" });
+		const dayInfoEl = headerEl.createDiv({ cls: "diary-day-info diary-weather-trigger" });
 		const sunEl = dayInfoEl.createDiv({ cls: "diary-day-icon" });
 		setIcon(sunEl, content.weatherIcon);
 		const dayTextEl = dayInfoEl.createDiv({ cls: "diary-day-text" });
 		dayTextEl.createSpan({ cls: "diary-day-name", text: dateInfo.fullDay });
 		dayTextEl.createSpan({ cls: "diary-day-date", text: `${dateInfo.month} ${dateInfo.day}, ${dateInfo.year}` });
+		dayInfoEl.addEventListener("click", (evt) => {
+			this.toggleWeatherPicker(dayInfoEl, content);
+			evt.stopPropagation();
+		});
 
 		const datePickerButtonEl = headerEl.createEl("button", {
 			cls: "diary-header-button",
@@ -926,6 +935,173 @@ export class DiaryView extends ItemView {
 		this.datePickerOpen = false;
 	}
 
+	private toggleWeatherPicker(anchorEl: HTMLElement, content: DiaryPageContent): void {
+		if (this.weatherPickerOpen) {
+			this.closeWeatherPicker();
+			return;
+		}
+
+		this.weatherPickerOpen = true;
+
+		const panelEl = document.body.createDiv({ cls: "diary-weather-picker" });
+		this.renderWeatherPickerContent(panelEl, content);
+
+		const anchorRect = anchorEl.getBoundingClientRect();
+		const panelHeight = panelEl.offsetHeight || 300;
+		const panelWidth = panelEl.offsetWidth || 260;
+		let top = anchorRect.bottom + 8;
+		let left = anchorRect.left + anchorRect.width / 2 - panelWidth / 2;
+		if (top + panelHeight > window.innerHeight) {
+			top = anchorRect.top - panelHeight - 8;
+		}
+		if (left < 8) left = 8;
+		if (left + panelWidth > window.innerWidth - 8) left = window.innerWidth - panelWidth - 8;
+		panelEl.style.top = `${top}px`;
+		panelEl.style.left = `${left}px`;
+
+		const onClickOutside = (evt: MouseEvent): void => {
+			if (!panelEl.contains(evt.target as Node) && evt.target !== anchorEl) {
+				this.closeWeatherPicker();
+			}
+		};
+
+		const onKeyDown = (evt: KeyboardEvent): void => {
+			if (evt.key === "Escape") {
+				this.closeWeatherPicker();
+			}
+		};
+
+		document.addEventListener("click", onClickOutside, true);
+		document.addEventListener("keydown", onKeyDown);
+		this.weatherPickerCleanup = () => {
+			document.removeEventListener("click", onClickOutside, true);
+			document.removeEventListener("keydown", onKeyDown);
+			panelEl.remove();
+		};
+	}
+
+	private closeWeatherPicker(): void {
+		if (this.weatherPickerCleanup) {
+			this.weatherPickerCleanup();
+			this.weatherPickerCleanup = null;
+		}
+		this.weatherPickerOpen = false;
+	}
+
+	private renderWeatherPickerContent(panelEl: HTMLElement, content: DiaryPageContent): void {
+		const weatherOptions = this.getWeatherOptions();
+		const currentIcon = content.weatherIcon;
+
+		panelEl.createDiv({ cls: "diary-weather-picker-title", text: "Weather" });
+
+		const gridEl = panelEl.createDiv({ cls: "diary-weather-picker-grid" });
+		for (const option of weatherOptions) {
+			const isActive = currentIcon === option.icon;
+			const itemEl = gridEl.createEl("button", {
+				cls: `diary-weather-picker-item${isActive ? " is-active" : ""}`,
+				attr: {
+					type: "button",
+					"aria-label": option.label,
+					title: option.label,
+				},
+			});
+			const iconEl = itemEl.createDiv({ cls: "diary-weather-picker-icon" });
+			setIcon(iconEl, option.icon);
+			itemEl.createSpan({ cls: "diary-weather-picker-label", text: option.label });
+			itemEl.addEventListener("click", (evt) => {
+				evt.stopPropagation();
+				this.closeWeatherPicker();
+				void this.applyWeatherChange(content.filePath, option.value);
+			});
+		}
+	}
+
+	private async applyWeatherChange(filePath: string, value: string): Promise<void> {
+		let file = this.app.vault.getAbstractFileByPath(filePath);
+		if (!(file instanceof TFile)) {
+			await this.ensureParentFolder(filePath);
+			this.plugin.suppressVaultRefresh(filePath, 1500);
+			file = await this.app.vault.create(filePath, "");
+		}
+
+		if (!(file instanceof TFile)) {
+			return;
+		}
+
+		try {
+			this.plugin.suppressVaultRefresh(filePath, 1500);
+			await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
+				frontmatter[this.getDailyWeatherFrontmatterKey()] = value;
+			});
+		} catch (error) {
+			console.warn("Failed to save weather in frontmatter", error);
+		}
+
+		const resolvedIcon = this.resolveWeatherIcon(value);
+		const cached = this.renderedContentByPath.get(filePath);
+		if (cached) {
+			cached.weatherValue = value;
+			cached.weatherIcon = resolvedIcon;
+		}
+
+		this.updateWeatherIcons(filePath, resolvedIcon);
+	}
+
+	private updateWeatherIcons(filePath: string, iconName: string): void {
+		const iconEls = Array.from(this.contentEl.querySelectorAll<HTMLElement>(".diary-day-icon"));
+		for (const iconEl of iconEls) {
+			setIcon(iconEl, iconName);
+		}
+	}
+
+	private static readonly WEATHER_OPTIONS: Array<{
+		icon: string;
+		labelEn: string;
+		labelZh: string;
+	}> = [
+		{ icon: "sun", labelEn: "Sun", labelZh: "晴" },
+		{ icon: "sun-dim", labelEn: "Sun dim", labelZh: "晴间多云" },
+		{ icon: "sun-medium", labelEn: "Sun medium", labelZh: "温和" },
+		{ icon: "sunrise", labelEn: "Sunrise", labelZh: "日出" },
+		{ icon: "sunset", labelEn: "Sunset", labelZh: "日落" },
+		{ icon: "cloud-sun", labelEn: "Partly cloudy", labelZh: "多云" },
+		{ icon: "cloud-sun-rain", labelEn: "Sun shower", labelZh: "太阳雨" },
+		{ icon: "sun-snow", labelEn: "Sun snow", labelZh: "太阳雪" },
+		{ icon: "cloud", labelEn: "Cloud", labelZh: "阴" },
+		{ icon: "cloud-off", labelEn: "Cloud off", labelZh: "少云" },
+		{ icon: "cloudy", labelEn: "Cloudy", labelZh: "阴天" },
+		{ icon: "cloud-fog", labelEn: "Fog", labelZh: "雾" },
+		{ icon: "haze", labelEn: "Haze", labelZh: "霾" },
+		{ icon: "cloud-drizzle", labelEn: "Drizzle", labelZh: "小雨" },
+		{ icon: "cloud-rain", labelEn: "Rain", labelZh: "雨" },
+		{ icon: "cloud-rain-wind", labelEn: "Heavy rain", labelZh: "大雨" },
+		{ icon: "cloud-hail", labelEn: "Hail", labelZh: "冰雹" },
+		{ icon: "cloud-lightning", labelEn: "Thunder", labelZh: "雷" },
+		{ icon: "cloud-snow", labelEn: "Snow", labelZh: "雪" },
+		{ icon: "snowflake", labelEn: "Snowflake", labelZh: "雪花" },
+		{ icon: "cloud-moon", labelEn: "Night cloudy", labelZh: "夜间多云" },
+		{ icon: "cloud-moon-rain", labelEn: "Night rain", labelZh: "夜间雨" },
+		{ icon: "moon-star", labelEn: "Night clear", labelZh: "夜间晴" },
+		{ icon: "wind", labelEn: "Wind", labelZh: "风" },
+		{ icon: "tornado", labelEn: "Tornado", labelZh: "龙卷风" },
+		{ icon: "thermometer", labelEn: "Thermometer", labelZh: "温度计" },
+		{ icon: "thermometer-sun", labelEn: "Hot", labelZh: "高温" },
+		{ icon: "thermometer-snowflake", labelEn: "Cold", labelZh: "低温" },
+		{ icon: "umbrella", labelEn: "Umbrella", labelZh: "伞" },
+		{ icon: "rainbow", labelEn: "Rainbow", labelZh: "彩虹" },
+		{ icon: "droplets", labelEn: "Droplets", labelZh: "水滴" },
+		{ icon: "waves", labelEn: "Waves", labelZh: "浪" },
+	];
+
+	private getWeatherOptions(): Array<{ value: string; icon: string; label: string }> {
+		const isZh = this.plugin.settings.weatherLanguage === "zh";
+		return DiaryView.WEATHER_OPTIONS.map((opt) => ({
+			value: isZh ? opt.labelZh : opt.icon,
+			icon: opt.icon,
+			label: isZh ? opt.labelZh : opt.labelEn,
+		}));
+	}
+
 	private renderDatePickerContent(panelEl: HTMLElement): void {
 		const monthNames = [
 			"January", "February", "March", "April", "May", "June",
@@ -1201,6 +1377,7 @@ export class DiaryView extends ItemView {
 		const weatherFrontmatterKey = this.getDailyWeatherFrontmatterKey();
 		const dailyQuote = readDailyQuote(frontmatter, quoteFrontmatterKey) ?? await this.fetchAndCacheDailyQuote(file);
 		const imageFrontmatterKey = this.plugin.settings.dailyImageFrontmatterKey || DEFAULT_DAILY_IMAGE_FRONTMATTER_KEY;
+		const rawWeather = readWeatherIcon(frontmatter, weatherFrontmatterKey);
 		return {
 			imageCaption: file.basename,
 			artworkImage: readArtworkImage(frontmatter, imageFrontmatterKey),
@@ -1214,7 +1391,8 @@ export class DiaryView extends ItemView {
 			markdown,
 			wordCount,
 			exists: true,
-			weatherIcon: this.resolveWeatherIcon(readWeatherIcon(frontmatter, weatherFrontmatterKey)),
+			weatherIcon: this.resolveWeatherIcon(rawWeather),
+			weatherValue: rawWeather,
 		};
 	}
 
@@ -1233,6 +1411,7 @@ export class DiaryView extends ItemView {
 			wordCount: 0,
 			exists: false,
 			weatherIcon: "sun",
+			weatherValue: null,
 		};
 	}
 
@@ -1342,44 +1521,45 @@ export class DiaryView extends ItemView {
 		return quote || null;
 	}
 
+	private static readonly ZH_TO_ICON: Record<string, string> = (() => {
+		const map: Record<string, string> = {};
+		for (const opt of DiaryView.WEATHER_OPTIONS) {
+			map[opt.labelZh] = opt.icon;
+		}
+		return map;
+	})();
+
+	private static readonly LEGACY_ALIAS_TO_ICON: Record<string, string> = {
+		clear: "sun",
+		sunny: "sun",
+		overcast: "cloud",
+		foggy: "cloud-fog",
+		rainy: "cloud-rain",
+		storm: "cloud-lightning",
+		thunder: "cloud-lightning",
+		snowy: "cloud-snow",
+		windy: "wind",
+	};
+
 	private resolveWeatherIcon(value: string | null): string {
 		if (!value) {
 			return "sun";
 		}
 
-		const normalized = value.trim().toLowerCase();
-		const weatherIconByValue: Record<string, string> = {
-			clear: "sun",
-			sun: "sun",
-			sunny: "sun",
-			晴: "sun",
-			cloud: "cloud",
-			cloudy: "cloud",
-			阴: "cloud",
-			多云: "cloud-sun",
-			overcast: "cloud",
-			fog: "cloud-fog",
-			foggy: "cloud-fog",
-			雾: "cloud-fog",
-			haze: "cloud-fog",
-			rain: "cloud-rain",
-			rainy: "cloud-rain",
-			雨: "cloud-rain",
-			小雨: "cloud-drizzle",
-			drizzle: "cloud-drizzle",
-			大雨: "cloud-rain-wind",
-			storm: "cloud-lightning",
-			thunder: "cloud-lightning",
-			雷雨: "cloud-lightning",
-			snow: "cloud-snow",
-			snowy: "cloud-snow",
-			雪: "cloud-snow",
-			wind: "wind",
-			windy: "wind",
-			风: "wind",
-		};
+		const trimmed = value.trim();
+		const lower = trimmed.toLowerCase();
 
-		return weatherIconByValue[normalized] ?? value.trim();
+		const zhMatch = DiaryView.ZH_TO_ICON[trimmed];
+		if (zhMatch) {
+			return zhMatch;
+		}
+
+		const legacyMatch = DiaryView.LEGACY_ALIAS_TO_ICON[lower];
+		if (legacyMatch) {
+			return legacyMatch;
+		}
+
+		return trimmed;
 	}
 
 	private buildDateItems(centerDate = new Date()): DiaryDateItem[] {
