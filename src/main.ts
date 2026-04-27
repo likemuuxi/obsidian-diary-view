@@ -92,9 +92,8 @@ export default class DiaryViewPlugin extends Plugin {
 				format: (parsed.format ?? DEFAULT_DAILY_NOTE_FORMAT).trim(),
 				template: parsed.template,
 			};
-		} catch (error) {
+		} catch {
 			this.dailyNotesConfig = null;
-			console.error("Failed to read daily-notes config", error);
 		}
 	}
 

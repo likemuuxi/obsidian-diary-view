@@ -72,6 +72,20 @@ export function readArtworkImage(frontmatter: unknown, key: string = DEFAULT_DAI
 	return readFrontmatterString(frontmatter, key);
 }
 
+export function extractFirstImage(body: string): string | null {
+	const wikiMatch = body.match(/!\[\[([^\]|]+)(?:\|[^\]]*)?]]/);
+	if (wikiMatch) {
+		return `[[${wikiMatch[1]}]]`;
+	}
+
+	const mdMatch = body.match(/!\[([^\]]*)]\(([^)]+)\)/);
+	if (mdMatch) {
+		return mdMatch[2] ?? null;
+	}
+
+	return null;
+}
+
 export interface DiarySection {
 	heading: string;
 	content: string;
@@ -149,46 +163,6 @@ export function writeAllBodyUnderHeadings(body: string, configuredHeading: strin
 	return nextBody;
 }
 
-export function readBodyUnderHeading(body: string, configuredHeading: string): string {
-	const headings = parseConfiguredHeadings(configuredHeading);
-	if (headings.length === 0) {
-		return body.trimEnd();
-	}
-
-	const heading = findFirstHeadingSection(body, headings);
-	return heading ? body.slice(heading.contentStart, heading.end).trim() : "";
-}
-
-export function writeBodyUnderHeading(body: string, configuredHeading: string, nextSectionBody: string): string {
-	const headings = parseConfiguredHeadings(configuredHeading);
-	const trimmedSectionBody = nextSectionBody.trimEnd();
-	if (headings.length === 0) {
-		return trimmedSectionBody;
-	}
-
-	const heading = findFirstHeadingSection(body, headings);
-	if (!heading) {
-		return appendHeadingSection(body, headings[0]!, trimmedSectionBody);
-	}
-
-	return joinHeadingSection(
-		body.slice(0, heading.start),
-		heading.headingLine,
-		trimmedSectionBody,
-		body.slice(heading.end),
-	);
-}
-
-function appendHeadingSection(body: string, configuredHeading: string, sectionBody: string): string {
-	const trimmedBody = body.trim();
-	const headingLine = createHeadingLine(configuredHeading);
-	let nextBody = trimmedBody ? `${trimmedBody}\n\n${headingLine}` : headingLine;
-	if (sectionBody) {
-		nextBody += `\n${sectionBody}`;
-	}
-	return nextBody;
-}
-
 function joinHeadingSection(before: string, headingLine: string, sectionBody: string, after: string): string {
 	const trimmedBefore = before.trimEnd();
 	const trimmedAfter = after.trimStart();
@@ -210,23 +184,6 @@ function createHeadingLine(configuredHeading: string): string {
 		return trimmedHeading;
 	}
 	return `## ${trimmedHeading}`;
-}
-
-function findFirstHeadingSection(body: string, configuredHeadings: string[]): MarkdownHeadingMatch | null {
-	const headings = getHeadingMatches(body);
-	if (headings.length === 0) {
-		return null;
-	}
-
-	for (const configuredHeading of configuredHeadings) {
-		const normalizedConfiguredTitle = normalizeHeadingTitle(configuredHeading);
-		const heading = headings.find((item) => normalizeHeadingTitle(item.title) === normalizedConfiguredTitle);
-		if (heading) {
-			return heading;
-		}
-	}
-
-	return null;
 }
 
 function parseConfiguredHeadings(configuredHeading: string): string[] {

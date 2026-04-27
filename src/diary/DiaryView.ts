@@ -7,14 +7,13 @@ import {
 	DEFAULT_DAILY_QUOTE_FRONTMATTER_KEY,
 	DEFAULT_DAILY_WEATHER_FRONTMATTER_KEY,
 	type DiarySection,
+	extractFirstImage,
 	readAllBodyUnderHeadings,
 	readArtworkImage,
-	readBodyUnderHeading,
 	readDailyQuote,
 	readWeatherIcon,
 	splitFrontmatter,
 	writeAllBodyUnderHeadings,
-	writeBodyUnderHeading,
 } from "./frontmatter";
 import { VIEW_TYPE_DIARY } from "../types";
 import {
@@ -52,8 +51,6 @@ interface DiaryPageContent {
 	promptText: string;
 	promptPlaceholder: string;
 	time: string;
-	streak: string;
-	msg: string;
 	filePath: string;
 	sections: DiarySection[];
 	markdown: string;
@@ -657,10 +654,6 @@ export class DiaryView extends ItemView {
 			itemEl.createSpan({ cls: "diary-calendar-number", text: date.day });
 			itemEl.createSpan({ cls: "diary-calendar-note-dot", attr: { "aria-hidden": "true" } });
 		});
-
-		const streakEl = pageEl.createDiv({ cls: "diary-streak" });
-		streakEl.createEl("h3", { text: content.streak });
-		streakEl.createEl("p", { text: content.msg });
 	}
 
 	private async renderRightPage(parentEl: HTMLElement, content: DiaryPageContent, isBackFace = false): Promise<void> {
@@ -1387,16 +1380,18 @@ export class DiaryView extends ItemView {
 		const weatherFrontmatterKey = this.getDailyWeatherFrontmatterKey();
 		const dailyQuote = readDailyQuote(frontmatter, quoteFrontmatterKey) ?? await this.fetchAndCacheDailyQuote(file);
 		const imageFrontmatterKey = this.plugin.settings.dailyImageFrontmatterKey || DEFAULT_DAILY_IMAGE_FRONTMATTER_KEY;
+		let artworkImage = readArtworkImage(frontmatter, imageFrontmatterKey);
+		if (!artworkImage && this.plugin.settings.useFirstImageAsArtwork) {
+			artworkImage = extractFirstImage(body);
+		}
 		const rawWeather = readWeatherIcon(frontmatter, weatherFrontmatterKey);
 		return {
 			imageCaption: file.basename,
-			artworkImage: readArtworkImage(frontmatter, imageFrontmatterKey),
+			artworkImage,
 			promptTitle: "Daily quote",
 			promptText: dailyQuote ?? "",
 			promptPlaceholder: "Write a sentence for today...",
 			time: this.formatTime(new Date(file.stat.mtime)),
-			streak: this.formatWordCount(wordCount),
-			msg: "Loaded from your Obsidian daily note.",
 			filePath: file.path,
 			sections,
 			markdown,
@@ -1415,8 +1410,6 @@ export class DiaryView extends ItemView {
 			promptText: "",
 			promptPlaceholder: "Write a sentence to create this daily note...",
 			time: date.path,
-			streak: this.formatWordCount(0),
-			msg: "Create this daily note in Obsidian to fill the page.",
 			filePath: date.path,
 			sections: [],
 			markdown: "",

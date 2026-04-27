@@ -8,6 +8,7 @@ export interface DiaryViewSettings {
 	dailyImageFrontmatterKey: string;
 	dailyNoteHeading: string;
 	weatherLanguage: "en" | "zh";
+	useFirstImageAsArtwork: boolean;
 }
 
 export const DEFAULT_SETTINGS: DiaryViewSettings = {
@@ -17,6 +18,7 @@ export const DEFAULT_SETTINGS: DiaryViewSettings = {
 	dailyImageFrontmatterKey: "daily-image",
 	dailyNoteHeading: "",
 	weatherLanguage: "en",
+	useFirstImageAsArtwork: false,
 };
 
 export class DiaryViewSettingTab extends PluginSettingTab {
@@ -102,6 +104,19 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 						const nextValue = value.trim() || DEFAULT_SETTINGS.dailyImageFrontmatterKey;
 						this.plugin.settings.dailyImageFrontmatterKey = nextValue;
 						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName("Use first image as artwork")
+			.setDesc("When enabled and no image frontmatter is set, the first image in the daily note is used as the diary artwork. When disabled, the default illustration is shown.")
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.useFirstImageAsArtwork)
+					.onChange(async (value) => {
+						this.plugin.settings.useFirstImageAsArtwork = value;
+						await this.plugin.saveSettings();
+						await this.plugin.refreshAllDiaryViews();
 					});
 			});
 
