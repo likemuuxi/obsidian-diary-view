@@ -1790,7 +1790,9 @@
 .diary-weather-picker {
 	position: fixed;
 	z-index: 9999;
-	width: 300px;
+	width: fit-content;
+	min-width: 220px;
+	max-width: 340px;
 	max-height: min(420px, 80vh);
 	padding: 16px;
 	border: 1px solid #e2e8f0;
