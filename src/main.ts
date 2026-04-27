@@ -21,7 +21,7 @@ export default class DiaryViewPlugin extends Plugin {
 
 		this.addSettingTab(new DiaryViewSettingTab(this.app, this));
 
-		this.addRibbonIcon("book-open-text", "Open diary view", () => {
+		this.addRibbonIcon("notebook-tabs", "Open diary view", () => {
 			void this.activateDiaryView();
 		});
 

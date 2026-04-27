@@ -1082,7 +1082,13 @@ export class DiaryView extends ItemView {
 
 	private resolveMoodIcon(value: string): MoodIconItem | null {
 		const allIcons = getAllMoodIcons(this.plugin.settings.customMoodIcons, this.plugin.settings.moodLanguage);
-		return allIcons.find((item) => item.name === value) ?? null;
+		const allIconsEn = getAllMoodIcons(this.plugin.settings.customMoodIcons, "en");
+		
+		return allIcons.find((item) => {
+			if (item.name === value || item.description === value || item.descriptionZh === value) return true;
+			const enMatch = allIconsEn.find(i => i.name === item.name);
+			return !!(enMatch && enMatch.description === value);
+		}) ?? null;
 	}
 
 	private toggleMoodPicker(anchorEl: HTMLElement, content: DiaryPageContent): void {
@@ -1202,6 +1208,7 @@ export class DiaryView extends ItemView {
 		}
 
 		const moodKey = this.plugin.settings.moodFrontmatterKey?.trim() || "daily-mood";
+		const match = iconName ? this.resolveMoodIcon(iconName) : null;
 
 		try {
 			this.plugin.suppressVaultRefresh(filePath, 1500);
@@ -1209,7 +1216,7 @@ export class DiaryView extends ItemView {
 				if (iconName === null) {
 					delete frontmatter[moodKey];
 				} else {
-					frontmatter[moodKey] = iconName;
+					frontmatter[moodKey] = match ? (match.description || match.name) : iconName;
 				}
 			});
 		} catch (error) {
