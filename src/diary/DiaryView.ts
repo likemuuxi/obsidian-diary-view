@@ -679,8 +679,10 @@ export class DiaryView extends ItemView {
 
 		const calendarEl = pageEl.createDiv({ cls: "diary-calendar" });
 		calendarDates.forEach((date) => {
+			const dow = date.date.getDay();
+			const isWeekend = dow === 0 || dow === 6;
 			const itemEl = calendarEl.createDiv({
-				cls: `diary-calendar-item${date.id === this.activeDateId ? " is-active" : ""}${date.hasNote ? " has-note" : ""}`,
+				cls: `diary-calendar-item${isWeekend ? " is-weekend" : ""}${date.id === this.activeDateId ? " is-active" : ""}${date.hasNote ? " has-note" : ""}`,
 			});
 			itemEl.dataset.dateId = date.id;
 			itemEl.addEventListener("click", () => {
@@ -2109,6 +2111,23 @@ export class DiaryView extends ItemView {
 				sourcePath,
 				false,
 			);
+		});
+
+		parentEl.addEventListener("mouseover", (event) => {
+			const target = event.target as HTMLElement | null;
+			const linkEl = target?.closest("a.internal-link");
+			if (!(linkEl instanceof HTMLAnchorElement)) {
+				return;
+			}
+
+			this.app.workspace.trigger("hover-link", {
+				event,
+				source: "diary-preview",
+				hoverParent: parentEl,
+				targetEl: linkEl,
+				linktext: linkEl.getAttribute("data-href") ?? linkEl.getAttribute("href") ?? "",
+				sourcePath,
+			});
 		});
 	}
 

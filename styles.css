@@ -484,6 +484,13 @@
 	cursor: pointer;
 }
 
+.diary-calendar-item.is-weekend .diary-calendar-dow {
+	border: 2px dashed;
+	padding: 2px;
+	border-radius: 5px;
+	color: color-mix(in srgb, #e8876e 80%, var(--diary-muted));
+}
+
 .diary-calendar-dow {
 	font-size: 13px;
 	font-weight: 700;
@@ -933,6 +940,11 @@
 .diary-lined-paper .diary-markdown-preview,
 .diary-lined-paper .diary-markdown-preview * {
 	cursor: text;
+}
+
+.diary-lined-paper .diary-markdown-preview a.internal-link,
+.diary-lined-paper .diary-markdown-preview a.external-link {
+	cursor: pointer;
 }
 
 .diary-turn-book,
