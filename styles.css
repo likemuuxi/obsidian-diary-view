@@ -1377,7 +1377,7 @@
 	}
 
 	.diary-page-right {
-		padding-top: 20px;
+		padding: 20px 16px 64px;
 		min-height: 70vh;
 		overflow: visible;
 	}

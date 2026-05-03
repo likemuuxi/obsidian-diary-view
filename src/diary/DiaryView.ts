@@ -27,6 +27,7 @@ import {
 	type WikilinkSuggestion,
 } from "./wikilink";
 import { getAllMoodIcons, type MoodIconItem } from "./mood";
+import { t, tCount, getMonthName, getShortWeekday, type Language } from "../i18n";
 
 const AUTOSAVE_DELAY_MS = 1500;
 const DESKTOP_BREAKPOINT_QUERY = "(min-width: 960px)";
@@ -109,11 +110,15 @@ export class DiaryView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return "Diary";
+		return t("app.name", this.lang());
 	}
 
 	getIcon(): string {
 		return "book-open-text";
+	}
+
+	private lang(): Language {
+		return this.plugin.settings.language;
 	}
 
 	async onOpen(): Promise<void> {
@@ -291,7 +296,6 @@ export class DiaryView extends ItemView {
 						event.preventDefault();
 						return;
 					}
-					// Clear visual active marker during animation
 					this.updateCalendarActiveState(null);
 				},
 				turned: (_event: unknown, page: number) => {
@@ -605,7 +609,9 @@ export class DiaryView extends ItemView {
 		setIcon(sunEl, content.weatherIcon);
 		const dayTextEl = dayInfoEl.createDiv({ cls: "diary-day-text" });
 		dayTextEl.createSpan({ cls: "diary-day-name", text: dateInfo.fullDay });
-		dayTextEl.createSpan({ cls: "diary-day-date", text: `${dateInfo.month} ${dateInfo.day}, ${dateInfo.year}` });
+		const dateLocale = this.lang() === "zh" ? "zh-CN" : undefined;
+		const formattedDate = dateInfo.date.toLocaleDateString(dateLocale, { year: "numeric", month: "long", day: "numeric" });
+		dayTextEl.createSpan({ cls: "diary-day-date", text: formattedDate });
 		dayInfoEl.addEventListener("click", (evt) => {
 			this.toggleWeatherPicker(dayInfoEl, content);
 			evt.stopPropagation();
@@ -615,8 +621,8 @@ export class DiaryView extends ItemView {
 			cls: "diary-header-button",
 			attr: {
 				type: "button",
-				"aria-label": "Pick a date",
-				title: "Pick a date",
+				"aria-label": t("calendar.pick-date", this.lang()),
+				title: t("calendar.pick-date", this.lang()),
 			},
 		});
 		setIcon(datePickerButtonEl, "calendar");
@@ -670,7 +676,7 @@ export class DiaryView extends ItemView {
 				}
 			}
 		} else {
-			moodTriggerEl.createSpan({ cls: "diary-mood-placeholder", text: "Set mood" });
+			moodTriggerEl.createSpan({ cls: "diary-mood-placeholder", text: t("mood.set-placeholder", this.lang()) });
 		}
 		moodTriggerEl.addEventListener("click", (evt) => {
 			this.toggleMoodPicker(moodTriggerEl, content);
@@ -695,6 +701,7 @@ export class DiaryView extends ItemView {
 	}
 
 	private async renderRightPage(parentEl: HTMLElement, content: DiaryPageContent, isBackFace = false): Promise<void> {
+		const lang = this.lang();
 		this.renderedContentByPath.set(content.filePath, content);
 		const pageEl = parentEl.createDiv({
 			cls: `diary-page diary-page-right${isBackFace ? " is-backface" : ""}`,
@@ -716,7 +723,7 @@ export class DiaryView extends ItemView {
 			cls: "diary-prompt-text",
 			attr: {
 				placeholder: content.promptPlaceholder,
-				"aria-label": `Edit daily quote for ${content.filePath}`,
+				"aria-label": `${t("quote.title", lang)} - ${content.filePath}`,
 			},
 		});
 		const promptWikilinkSuggestEl = promptEditorWrapEl.createDiv({ cls: "diary-wikilink-suggest", attr: { hidden: "hidden" } });
@@ -751,18 +758,17 @@ export class DiaryView extends ItemView {
 		setIcon(quillEl, content.exists ? "notebook-tabs" : "file-plus-2");
 		intentionLabelEl.createDiv({
 			cls: "diary-intention-title",
-			text: content.exists ? "Daily note content" : "No daily note exists for this date yet.",
+			text: content.exists ? t("content.heading", lang) : t("content.empty-title", lang),
 		});
 		const intentionActionsEl = intentionHeadEl.createDiv({ cls: "diary-intention-actions" });
 
-
 		const previewButtonEl = this.renderPromptAction(
 			intentionActionsEl,
-			"eye",
-			"Preview Markdown",
+			isPreview ? "pencil" : "eye",
+			isPreview ? t("content.edit-btn", lang) : t("content.preview-btn", lang),
 		);
 		previewButtonEl.addClass("diary-preview-toggle", "is-toggle", "diary-preview-mode-button");
-		this.updatePreviewToggleButton(previewButtonEl, isPreview);
+		previewButtonEl.toggleClass("is-active", isPreview);
 		if (!isBackFace) {
 			previewButtonEl.addEventListener("click", () => {
 				void this.updateMarkdownPreviewMode(!this.isMarkdownPreview);
@@ -811,7 +817,12 @@ export class DiaryView extends ItemView {
 			}
 
 			if (previewButtonEl) {
-				this.updatePreviewToggleButton(previewButtonEl, isPreview);
+				const lang = this.lang();
+				const label = isPreview ? t("content.edit-btn", lang) : t("content.preview-btn", lang);
+				previewButtonEl.setAttribute("aria-label", label);
+				previewButtonEl.setAttribute("title", label);
+				previewButtonEl.toggleClass("is-active", isPreview);
+				setIcon(previewButtonEl, isPreview ? "pencil" : "eye");
 			}
 			await this.renderMarkdownEditorBody(linedPaperEl, footerCountEl, content, false);
 		}));
@@ -823,6 +834,7 @@ export class DiaryView extends ItemView {
 		content: DiaryPageContent,
 		isBackFace: boolean,
 	): Promise<void> {
+		const lang = this.lang();
 		linedPaperEl.empty();
 		const hasSections = content.sections.length > 0;
 		const fullMarkdown = this.drafts.has(content.filePath)
@@ -841,7 +853,7 @@ export class DiaryView extends ItemView {
 				await MarkdownRenderer.render(this.app, fullMarkdown, previewEl, content.filePath, this);
 				this.bindMarkdownLinks(previewEl, content.filePath);
 			} else {
-				previewEl.createDiv({ cls: "diary-note-empty", text: "There is no content to preview yet." });
+				previewEl.createDiv({ cls: "diary-note-empty", text: t("content.empty-preview", lang) });
 			}
 			return;
 		}
@@ -850,8 +862,8 @@ export class DiaryView extends ItemView {
 		const textareaEl = editorWrapEl.createEl("textarea", {
 			cls: "diary-intention-textarea",
 			attr: {
-				placeholder: "Write this daily note...",
-				"aria-label": `Edit daily note ${content.filePath}`,
+				placeholder: t("content.textarea-placeholder", lang),
+				"aria-label": `${t("content.heading", lang)} ${content.filePath}`,
 			},
 		});
 		const wikilinkSuggestEl = editorWrapEl.createDiv({ cls: "diary-wikilink-suggest", attr: { hidden: "hidden" } });
@@ -874,14 +886,6 @@ export class DiaryView extends ItemView {
 			this.scheduleDailyNoteSave(content.filePath, value);
 			this.updateFooterWordCount(footerCountEl, value);
 		});
-	}
-
-	private updatePreviewToggleButton(buttonEl: HTMLButtonElement, isPreview: boolean): void {
-		const label = isPreview ? "Switch to editing" : "Preview Markdown";
-		buttonEl.setAttribute("aria-label", label);
-		buttonEl.setAttribute("title", label);
-		buttonEl.toggleClass("is-active", isPreview);
-		setIcon(buttonEl, isPreview ? "pencil" : "eye");
 	}
 
 	private renderPromptAction(parentEl: HTMLElement, icon: string, label: string): HTMLButtonElement {
@@ -1025,7 +1029,7 @@ export class DiaryView extends ItemView {
 		const weatherOptions = this.getWeatherOptions();
 		const currentIcon = content.weatherIcon;
 
-		panelEl.createDiv({ cls: "diary-weather-picker-title", text: "Weather" });
+		panelEl.createDiv({ cls: "diary-weather-picker-title", text: t("weather.picker-title", this.lang()) });
 
 		const gridEl = panelEl.createDiv({ cls: "diary-weather-picker-grid" });
 		for (const option of weatherOptions) {
@@ -1152,18 +1156,19 @@ export class DiaryView extends ItemView {
 	}
 
 	private renderMoodPickerContent(panelEl: HTMLElement, content: DiaryPageContent): void {
+		const lang = this.lang();
 		const allIcons = getAllMoodIcons(this.plugin.settings.customMoodIcons, this.plugin.settings.moodLanguage);
 		const currentIcon = content.moodIconName;
 
 		const headerEl = panelEl.createDiv({ cls: "diary-mood-picker-header" });
-		headerEl.createDiv({ cls: "diary-mood-picker-title", text: "Mood" });
+		headerEl.createDiv({ cls: "diary-mood-picker-title", text: t("mood.picker-title", lang) });
 		if (currentIcon) {
 			const clearBtn = headerEl.createEl("button", {
 				cls: "diary-mood-picker-clear",
 				attr: {
 					type: "button",
-					"aria-label": "Clear mood",
-					title: "Clear mood",
+					"aria-label": t("mood.clear", lang),
+					title: t("mood.clear", lang),
 				},
 			});
 			setIcon(clearBtn, "x");
@@ -1241,6 +1246,7 @@ export class DiaryView extends ItemView {
 	}
 
 	private updateMoodDisplay(filePath: string, iconName: string | null, description: string | null): void {
+		const lang = this.lang();
 		const moodTriggers = Array.from(this.contentEl.querySelectorAll<HTMLElement>(`.diary-mood-trigger[data-file-path="${CSS.escape(filePath)}"]`));
 		const match = iconName ? this.resolveMoodIcon(iconName) : null;
 		for (const triggerEl of moodTriggers) {
@@ -1259,7 +1265,7 @@ export class DiaryView extends ItemView {
 					}
 				}
 			} else {
-				triggerEl.createSpan({ cls: "diary-mood-placeholder", text: "Set mood" });
+				triggerEl.createSpan({ cls: "diary-mood-placeholder", text: t("mood.set-placeholder", lang) });
 			}
 		}
 	}
@@ -1313,16 +1319,13 @@ export class DiaryView extends ItemView {
 	}
 
 	private renderDatePickerContent(panelEl: HTMLElement): void {
-		const monthNames = [
-			"January", "February", "March", "April", "May", "June",
-			"July", "August", "September", "October", "November", "December",
-		];
-		const weekDays = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+		const lang = this.lang();
+		const weekDays = Array.from({ length: 7 }, (_, i) => getShortWeekday(i, lang));
 
 		const headerEl = panelEl.createDiv({ cls: "diary-date-picker-header" });
 		const prevBtn = headerEl.createEl("button", {
 			cls: "diary-date-picker-nav",
-			attr: { type: "button", "aria-label": "Previous month" },
+			attr: { type: "button", "aria-label": t("calendar.prev-month", lang) },
 		});
 		setIcon(prevBtn, "chevron-left");
 		prevBtn.addEventListener("click", (evt) => {
@@ -1335,11 +1338,14 @@ export class DiaryView extends ItemView {
 			this.refreshDatePickerContent(panelEl);
 		});
 
-		headerEl.createSpan({ cls: "diary-date-picker-title", text: `${monthNames[this.datePickerMonth]} ${this.datePickerYear}` });
+		headerEl.createSpan({
+			cls: "diary-date-picker-title",
+			text: `${getMonthName(this.datePickerMonth, lang)} ${this.datePickerYear}`,
+		});
 
 		const nextBtn = headerEl.createEl("button", {
 			cls: "diary-date-picker-nav",
-			attr: { type: "button", "aria-label": "Next month" },
+			attr: { type: "button", "aria-label": t("calendar.next-month", lang) },
 		});
 		setIcon(nextBtn, "chevron-right");
 		nextBtn.addEventListener("click", (evt) => {
@@ -1366,7 +1372,7 @@ export class DiaryView extends ItemView {
 		});
 		const todayIconEl = todayBtn.createDiv({ cls: "diary-date-picker-today-icon" });
 		setIcon(todayIconEl, "calendar-clock");
-		todayBtn.createSpan({ text: "Today" });
+		todayBtn.createSpan({ text: t("calendar.today", lang) });
 		todayBtn.addEventListener("click", (evt) => {
 			evt.stopPropagation();
 			const today = new Date();
@@ -1377,18 +1383,14 @@ export class DiaryView extends ItemView {
 	}
 
 	private refreshDatePickerContent(panelEl: HTMLElement): void {
-		const monthNames = [
-			"January", "February", "March", "April", "May", "June",
-			"July", "August", "September", "October", "November", "December",
-		];
+		const lang = this.lang();
 		const titleEl = panelEl.querySelector(".diary-date-picker-title");
 		if (titleEl) {
-			titleEl.textContent = `${monthNames[this.datePickerMonth]} ${this.datePickerYear}`;
+			titleEl.textContent = `${getMonthName(this.datePickerMonth, lang)} ${this.datePickerYear}`;
 		}
 
 		const gridEl = panelEl.querySelector(".diary-date-picker-grid");
 		if (gridEl) {
-			const weekdays = gridEl.querySelectorAll(".diary-date-picker-weekday");
 			const days = gridEl.querySelectorAll(".diary-date-picker-day, .diary-date-picker-empty");
 			days.forEach((el) => el.remove());
 			this.renderDatePickerDays(gridEl as HTMLElement);
@@ -1573,6 +1575,7 @@ export class DiaryView extends ItemView {
 	}
 
 	private async loadContentForDate(date: DiaryDateItem): Promise<DiaryPageContent> {
+		const lang = this.lang();
 		const file = this.app.vault.getAbstractFileByPath(date.path);
 		if (!(file instanceof TFile)) {
 			return this.createMissingContent(date);
@@ -1599,9 +1602,9 @@ export class DiaryView extends ItemView {
 		return {
 			imageCaption: file.basename,
 			artworkImage,
-			promptTitle: "Daily quote",
+			promptTitle: t("quote.title", lang),
 			promptText: dailyQuote ?? "",
-			promptPlaceholder: "Write a sentence for today...",
+			promptPlaceholder: t("quote.placeholder-existing", lang),
 			time: this.formatTime(new Date(file.stat.mtime)),
 			filePath: file.path,
 			sections,
@@ -1616,12 +1619,13 @@ export class DiaryView extends ItemView {
 	}
 
 	private createMissingContent(date: DiaryDateItem): DiaryPageContent {
+		const lang = this.lang();
 		return {
-			imageCaption: "No note yet",
+			imageCaption: t("content.no-note-caption", lang),
 			artworkImage: null,
-			promptTitle: "Daily quote",
+			promptTitle: t("quote.title", lang),
 			promptText: "",
-			promptPlaceholder: "Write a sentence to create this daily note...",
+			promptPlaceholder: t("quote.placeholder-new", lang),
 			time: date.path,
 			filePath: date.path,
 			sections: [],
@@ -1840,19 +1844,20 @@ export class DiaryView extends ItemView {
 	}
 
 	private getRelativeDateLabel(date: Date): string {
+		const lang = this.lang();
 		const target = new Date(date);
 		target.setHours(0, 0, 0, 0);
 		const today = new Date();
 		today.setHours(0, 0, 0, 0);
 		const dayOffset = Math.round((target.getTime() - today.getTime()) / 86_400_000);
 		if (dayOffset === 0) {
-			return "Today";
+			return t("calendar.today", lang);
 		}
 		if (dayOffset === -1) {
-			return "Yesterday";
+			return t("calendar.yesterday", lang);
 		}
 		if (dayOffset === 1) {
-			return "Tomorrow";
+			return t("calendar.tomorrow", lang);
 		}
 		return this.formatDatePart(date, "shortWeekday");
 	}
@@ -1872,6 +1877,7 @@ export class DiaryView extends ItemView {
 	}
 
 	private formatDatePart(date: Date, part: "day" | "shortMonth" | "shortWeekday" | "longWeekday" | "year"): string {
+		const lang = this.lang();
 		if (part === "day") {
 			return String(date.getDate()).padStart(2, "0");
 		}
@@ -1879,13 +1885,14 @@ export class DiaryView extends ItemView {
 			return String(date.getFullYear());
 		}
 		if (part === "shortMonth") {
-			return date.toLocaleDateString(undefined, { month: "short" });
+			// Use abbreviated month name
+			return date.toLocaleDateString(lang === "zh" ? "zh-CN" : undefined, { month: "short" });
 		}
-		return date.toLocaleDateString(undefined, { weekday: part === "shortWeekday" ? "short" : "long" });
+		return date.toLocaleDateString(lang === "zh" ? "zh-CN" : undefined, { weekday: part === "shortWeekday" ? "short" : "long" });
 	}
 
 	private formatTime(date: Date): string {
-		return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+		return date.toLocaleTimeString(this.lang() === "zh" ? "zh-CN" : undefined, { hour: "2-digit", minute: "2-digit" });
 	}
 
 	private countWords(markdown: string): number {
@@ -1910,15 +1917,16 @@ export class DiaryView extends ItemView {
 	}
 
 	private formatWordCount(count: number): string {
-		return `${count} chars`;
+		return tCount("wordcount.chars", this.lang(), count);
 	}
 
 	private createPreviewText(markdown: string): string {
+		const lang = this.lang();
 		const firstLine = markdown
 			.split("\n")
 			.map((line) => line.replace(/^#+\s*/, "").trim())
 			.find(Boolean);
-		return firstLine ?? "Daily note is empty.";
+		return firstLine ?? t("content.empty-summary", lang);
 	}
 
 	private scheduleDailyNoteSave(path: string, markdown: string): void {
@@ -2137,6 +2145,7 @@ export class DiaryView extends ItemView {
 		sourcePath: string,
 		onChange: (value: string) => void,
 	): void {
+		const lang = this.lang();
 		let suggestions: WikilinkSuggestion[] = [];
 		let selectedIndex = 0;
 		let activeContext: WikilinkContext | null = null;
@@ -2241,6 +2250,14 @@ export class DiaryView extends ItemView {
 			panelEl.removeAttribute("hidden");
 			this.positionWikilinkSuggestPanel(textareaEl, panelEl);
 			suggestions.forEach((item, index) => {
+				const typeKey = item.type === "file"
+					? "wikilink.type-file"
+					: item.type === "heading"
+						? "wikilink.type-heading"
+						: item.type === "paragraph"
+							? "wikilink.type-paragraph"
+							: "wikilink.type-block";
+
 				const itemEl = panelEl.createEl("button", {
 					cls: `diary-wikilink-suggest-item${index === selectedIndex ? " is-selected" : ""}`,
 					attr: {
@@ -2254,15 +2271,7 @@ export class DiaryView extends ItemView {
 				});
 
 				const typeEl = itemEl.createSpan({ cls: "diary-wikilink-suggest-type" });
-				typeEl.setText(
-					item.type === "file"
-						? "File"
-						: item.type === "heading"
-							? "Heading"
-							: item.type === "paragraph"
-								? "Paragraph"
-								: "Block",
-				);
+				typeEl.setText(t(typeKey, lang));
 
 				const contentEl = itemEl.createSpan({ cls: "diary-wikilink-suggest-content" });
 				contentEl.createSpan({
@@ -2408,13 +2417,13 @@ export class DiaryView extends ItemView {
 	): Promise<string | null> {
 		const file = this.app.vault.getAbstractFileByPath(item.path);
 		if (!(file instanceof TFile)) {
-			new Notice("Source file no longer exists.");
+			new Notice(t("app.file-not-found", this.lang()));
 			return null;
 		}
 
 		const rawContent = (await this.app.vault.cachedRead(file)).replace(/\r\n/g, "\n");
 		if (item.appendOffset < 0 || item.appendOffset > rawContent.length) {
-			new Notice("Could not locate the selected paragraph.");
+			new Notice(t("app.cannot-locate-paragraph", this.lang()));
 			return null;
 		}
 

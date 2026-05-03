@@ -1,6 +1,30 @@
-import { App, PluginSettingTab, Setting, setIcon } from "obsidian";
+import { App, PluginSettingTab, Setting, setIcon, moment } from "obsidian";
 import type DiaryViewPlugin from "./main";
 import type { MoodIconItem } from "./diary/mood";
+import { t, LANGUAGES, type Language } from "./i18n";
+
+/**
+ * Detect the user's preferred language from Obsidian's locale setting.
+ * Falls back to browser language, then English.
+ */
+export function detectLanguage(): Language {
+	// 1) Obsidian's moment locale
+	const obsidianLocale = moment.locale();
+	if (obsidianLocale === "zh-cn" || obsidianLocale === "zh-tw" || obsidianLocale === "zh") {
+		return "zh";
+	}
+
+	// 2) Browser language
+	if (typeof navigator !== "undefined") {
+		const navLang = navigator.language?.toLowerCase() ?? "";
+		if (navLang.startsWith("zh")) {
+			return "zh";
+		}
+	}
+
+	// 3) Default
+	return "en";
+}
 
 export interface DiaryViewSettings {
 	dailyQuoteApiUrl: string;
@@ -8,6 +32,7 @@ export interface DiaryViewSettings {
 	dailyWeatherFrontmatterKey: string;
 	dailyImageFrontmatterKey: string;
 	dailyNoteHeading: string;
+	language: Language;
 	weatherLanguage: "en" | "zh";
 	useFirstImageAsArtwork: boolean;
 	moodFrontmatterKey: string;
@@ -21,10 +46,11 @@ export const DEFAULT_SETTINGS: DiaryViewSettings = {
 	dailyWeatherFrontmatterKey: "daily-weather",
 	dailyImageFrontmatterKey: "daily-image",
 	dailyNoteHeading: "",
+	language: detectLanguage(),
 	weatherLanguage: "en",
 	useFirstImageAsArtwork: false,
 	moodFrontmatterKey: "daily-mood",
-	moodLanguage: "en",
+	moodLanguage: detectLanguage(),
 	customMoodIcons: [],
 };
 
@@ -36,18 +62,40 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
+	private lang(): Language {
+		return this.plugin.settings.language;
+	}
+
 	display(): void {
 		const { containerEl } = this;
-
+		const lang = this.lang();
 		containerEl.empty();
 
+		// ── Language ──
 		new Setting(containerEl)
-			.setName("Daily note heading")
-			.setDesc("Optional. Enter one or more Markdown headings. The diary view uses the first matching heading, and creates the first one when none exist.")
+			.setName(t("settings.language.name", lang))
+			.setDesc(t("settings.language.desc", lang))
+			.addDropdown((dropdown) => {
+				for (const l of LANGUAGES) {
+					dropdown.addOption(l.value, l.label);
+				}
+				dropdown.setValue(this.plugin.settings.language)
+					.onChange(async (value) => {
+						this.plugin.settings.language = value as Language;
+						await this.plugin.saveSettings();
+						this.display();
+						await this.plugin.refreshAllDiaryViews();
+					});
+			});
+
+		// ── Daily note heading ──
+		new Setting(containerEl)
+			.setName(t("settings.daily-note-heading.name", lang))
+			.setDesc(t("settings.daily-note-heading.desc", lang))
 			.addTextArea((text) => {
 				text.inputEl.rows = 3;
 				text
-					.setPlaceholder("Diary\nJournal\nDaily note")
+					.setPlaceholder(t("settings.daily-note-heading.placeholder", lang))
 					.setValue(this.plugin.settings.dailyNoteHeading)
 					.onChange(async (value) => {
 						this.plugin.settings.dailyNoteHeading = value.trim();
@@ -56,12 +104,13 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					});
 			});
 
+		// ── Quote frontmatter key ──
 		new Setting(containerEl)
-			.setName("Quote frontmatter key")
-			.setDesc("Frontmatter property used to read and save the daily quote.")
+			.setName(t("settings.quote-key.name", lang))
+			.setDesc(t("settings.quote-key.desc", lang))
 			.addText((text) => {
 				text
-					.setPlaceholder("daily-quote")
+					.setPlaceholder(t("settings.quote-key.placeholder", lang))
 					.setValue(this.plugin.settings.dailyQuoteFrontmatterKey)
 					.onChange(async (value) => {
 						const nextValue = value.trim() || DEFAULT_SETTINGS.dailyQuoteFrontmatterKey;
@@ -71,13 +120,14 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					});
 			});
 
+		// ── Daily quote API ──
 		new Setting(containerEl)
-			.setName("Daily quote API")
-			.setDesc("Optional. The diary view requests this URL once per daily note, then caches the quote in frontmatter.")
+			.setName(t("settings.quote-api.name", lang))
+			.setDesc(t("settings.quote-api.desc", lang))
 			.addText((text) => {
 				text.inputEl.type = "url";
 				text
-					.setPlaceholder("https://example.com/daily-quote")
+					.setPlaceholder(t("settings.quote-api.placeholder", lang))
 					.setValue(this.plugin.settings.dailyQuoteApiUrl)
 					.onChange(async (value) => {
 						this.plugin.settings.dailyQuoteApiUrl = value.trim();
@@ -85,12 +135,13 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					});
 			});
 
+		// ── Weather frontmatter key ──
 		new Setting(containerEl)
-			.setName("Weather frontmatter key")
-			.setDesc("Frontmatter property used to read the daily weather icon.")
+			.setName(t("settings.weather-key.name", lang))
+			.setDesc(t("settings.weather-key.desc", lang))
 			.addText((text) => {
 				text
-					.setPlaceholder("daily-weather")
+					.setPlaceholder(t("settings.weather-key.placeholder", lang))
 					.setValue(this.plugin.settings.dailyWeatherFrontmatterKey)
 					.onChange(async (value) => {
 						const nextValue = value.trim() || DEFAULT_SETTINGS.dailyWeatherFrontmatterKey;
@@ -100,9 +151,10 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					});
 			});
 
+		// ── Weather language ──
 		new Setting(containerEl)
-			.setName("Weather language")
-			.setDesc("Display language for the weather picker menu.")
+			.setName(t("settings.weather-lang.name", lang))
+			.setDesc(t("settings.weather-lang.desc", lang))
 			.addDropdown((dropdown) => {
 				dropdown
 					.addOption("en", "English")
@@ -115,12 +167,13 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					});
 			});
 
+		// ── Image frontmatter key ──
 		new Setting(containerEl)
-			.setName("Image frontmatter key")
-			.setDesc("Frontmatter property used to read the diary image URL or path.")
+			.setName(t("settings.image-key.name", lang))
+			.setDesc(t("settings.image-key.desc", lang))
 			.addText((text) => {
 				text
-					.setPlaceholder("daily-image")
+					.setPlaceholder(t("settings.image-key.placeholder", lang))
 					.setValue(this.plugin.settings.dailyImageFrontmatterKey)
 					.onChange(async (value) => {
 						const nextValue = value.trim() || DEFAULT_SETTINGS.dailyImageFrontmatterKey;
@@ -129,9 +182,10 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					});
 			});
 
+		// ── Use first image as artwork ──
 		new Setting(containerEl)
-			.setName("Use first image as artwork")
-			.setDesc("When enabled and no image frontmatter is set, the first image in the daily note is used as the diary artwork. When disabled, the default illustration is shown.")
+			.setName(t("settings.use-first-image.name", lang))
+			.setDesc(t("settings.use-first-image.desc", lang))
 			.addToggle((toggle) => {
 				toggle
 					.setValue(this.plugin.settings.useFirstImageAsArtwork)
@@ -142,12 +196,13 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					});
 			});
 
+		// ── Mood frontmatter key ──
 		new Setting(containerEl)
-			.setName("Mood frontmatter key")
-			.setDesc("Frontmatter property used to read and save the daily mood icon.")
+			.setName(t("settings.mood-key.name", lang))
+			.setDesc(t("settings.mood-key.desc", lang))
 			.addText((text) => {
 				text
-					.setPlaceholder("daily-mood")
+					.setPlaceholder(t("settings.mood-key.placeholder", lang))
 					.setValue(this.plugin.settings.moodFrontmatterKey)
 					.onChange(async (value) => {
 						const nextValue = value.trim() || DEFAULT_SETTINGS.moodFrontmatterKey;
@@ -157,9 +212,10 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					});
 			});
 
+		// ── Mood language ──
 		new Setting(containerEl)
-			.setName("Mood language")
-			.setDesc("Display language for built-in mood descriptions.")
+			.setName(t("settings.mood-lang.name", lang))
+			.setDesc(t("settings.mood-lang.desc", lang))
 			.addDropdown((dropdown) => {
 				dropdown
 					.addOption("en", "English")
@@ -172,19 +228,20 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					});
 			});
 
-		containerEl.createDiv({ cls: "diary-settings-mood-heading", text: "Custom mood icons" });
+		// ── Custom mood icons heading ──
+		containerEl.createDiv({ cls: "diary-settings-mood-heading", text: t("settings.custom-mood.heading", lang) });
 		containerEl.createDiv({
 			cls: "diary-settings-mood-desc",
-			text: "Add custom Lucide icon names and descriptions. Icons appear alongside the built-in mood icons in the diary view.",
+			text: t("settings.custom-mood.desc", lang),
 		});
 
 		this.renderCustomMoodIcons(containerEl);
 
 		new Setting(containerEl)
-			.setName("Add mood icon")
+			.setName(t("settings.custom-mood.add-btn", lang))
 			.addButton((btn) => {
 				btn
-					.setButtonText("Add icon")
+					.setButtonText(t("settings.custom-mood.add-btn", lang))
 					.setClass("diary-settings-mood-add-btn")
 					.onClick(async () => {
 						this.plugin.settings.customMoodIcons.push({ name: "", description: "" });
@@ -195,6 +252,7 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 	}
 
 	private renderCustomMoodIcons(containerEl: HTMLElement): void {
+		const lang = this.lang();
 		const icons = this.plugin.settings.customMoodIcons;
 		for (let i = 0; i < icons.length; i++) {
 			const index = i;
@@ -215,7 +273,7 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 				cls: "diary-settings-mood-input",
 				attr: {
 					type: "text",
-					placeholder: "Lucide icon name (e.g. smile)",
+					placeholder: t("settings.custom-mood.name-placeholder", lang),
 					value: icon.name,
 				},
 			});
@@ -223,7 +281,7 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 				cls: "diary-settings-mood-input",
 				attr: {
 					type: "text",
-					placeholder: "Description (e.g. Happy)",
+					placeholder: t("settings.custom-mood.desc-placeholder", lang),
 					value: icon.description,
 				},
 			});
@@ -231,7 +289,7 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 				cls: "diary-settings-mood-color",
 				attr: {
 					type: "color",
-					title: "Color",
+					title: t("settings.custom-mood.color-tooltip", lang),
 				},
 			});
 			colorInput.value = (icon.color && /^#[0-9a-fA-F]{6}$/.test(icon.color)) ? icon.color : "#9e9e9e";
@@ -269,11 +327,10 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 				await this.plugin.refreshAllDiaryViews();
 			});
 
-
 			setting.addExtraButton((extraBtn) => {
 				extraBtn
 					.setIcon("trash-2")
-					.setTooltip("Remove")
+					.setTooltip(t("settings.custom-mood.remove-tooltip", lang))
 					.onClick(async () => {
 						this.plugin.settings.customMoodIcons.splice(index, 1);
 						await this.plugin.saveSettings();
