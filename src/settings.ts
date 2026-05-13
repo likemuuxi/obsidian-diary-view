@@ -33,10 +33,10 @@ export interface DiaryViewSettings {
 	dailyImageFrontmatterKey: string;
 	dailyNoteHeading: string;
 	language: Language;
-	weatherLanguage: "en" | "zh";
+	startOfWeek: number;
+	weekendDays: number[];
 	useFirstImageAsArtwork: boolean;
 	moodFrontmatterKey: string;
-	moodLanguage: "en" | "zh";
 	customMoodIcons: MoodIconItem[];
 }
 
@@ -47,10 +47,10 @@ export const DEFAULT_SETTINGS: DiaryViewSettings = {
 	dailyImageFrontmatterKey: "daily-image",
 	dailyNoteHeading: "",
 	language: detectLanguage(),
-	weatherLanguage: "en",
+	startOfWeek: 1,
+	weekendDays: [0, 6],
 	useFirstImageAsArtwork: false,
 	moodFrontmatterKey: "daily-mood",
-	moodLanguage: detectLanguage(),
 	customMoodIcons: [],
 };
 
@@ -87,6 +87,53 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 						await this.plugin.refreshAllDiaryViews();
 					});
 			});
+
+		new Setting(containerEl)
+			.setName(t("settings.start-of-week.name", lang))
+			.setDesc(t("settings.start-of-week.desc", lang))
+			.addDropdown((dropdown) => {
+				dropdown
+					.addOption("1", t("settings.start-of-week.monday", lang))
+					.addOption("0", t("settings.start-of-week.sunday", lang));
+				dropdown.setValue(String(this.plugin.settings.startOfWeek))
+					.onChange(async (value) => {
+						this.plugin.settings.startOfWeek = Number(value);
+						await this.plugin.saveSettings();
+						this.display();
+						await this.plugin.refreshAllDiaryViews();
+					});
+			});
+
+		const weekendSetting = new Setting(containerEl)
+			.setName(t("settings.weekend-days.name", lang))
+			.setDesc(t("settings.weekend-days.desc", lang))
+			.setClass("diary-settings-weekend-days");
+
+		const weekendWrapEl = weekendSetting.controlEl.createDiv({ cls: "diary-weekend-checkboxes" });
+		const startOfWeek = this.plugin.settings.startOfWeek;
+		for (let i = 0; i < 7; i++) {
+			const dow = (startOfWeek + i) % 7;
+			const checked = this.plugin.settings.weekendDays.includes(dow);
+			const labelEl = weekendWrapEl.createEl("label", { cls: "diary-weekend-checkbox-label" });
+			const checkbox = labelEl.createEl("input", {
+				cls: "diary-weekend-checkbox",
+				attr: { type: "checkbox", value: String(dow) },
+			});
+			checkbox.checked = checked;
+			labelEl.createSpan({ text: t(`calendar.weekday.short.${dow}`, lang) });
+			checkbox.addEventListener("change", async () => {
+				if (checkbox.checked) {
+					if (!this.plugin.settings.weekendDays.includes(dow)) {
+						this.plugin.settings.weekendDays.push(dow);
+						this.plugin.settings.weekendDays.sort((a, b) => a - b);
+					}
+				} else {
+					this.plugin.settings.weekendDays = this.plugin.settings.weekendDays.filter((d) => d !== dow);
+				}
+				await this.plugin.saveSettings();
+				await this.plugin.refreshAllDiaryViews();
+			});
+		}
 
 		// ── Daily note heading ──
 		new Setting(containerEl)
@@ -150,18 +197,18 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 						await this.plugin.refreshAllDiaryViews();
 					});
 			});
-
-		// ── Weather language ──
+			
+		// ── Mood frontmatter key ──
 		new Setting(containerEl)
-			.setName(t("settings.weather-lang.name", lang))
-			.setDesc(t("settings.weather-lang.desc", lang))
-			.addDropdown((dropdown) => {
-				dropdown
-					.addOption("en", "English")
-					.addOption("zh", "中文")
-					.setValue(this.plugin.settings.weatherLanguage)
+			.setName(t("settings.mood-key.name", lang))
+			.setDesc(t("settings.mood-key.desc", lang))
+			.addText((text) => {
+				text
+					.setPlaceholder(t("settings.mood-key.placeholder", lang))
+					.setValue(this.plugin.settings.moodFrontmatterKey)
 					.onChange(async (value) => {
-						this.plugin.settings.weatherLanguage = value as "en" | "zh";
+						const nextValue = value.trim() || DEFAULT_SETTINGS.moodFrontmatterKey;
+						this.plugin.settings.moodFrontmatterKey = nextValue;
 						await this.plugin.saveSettings();
 						await this.plugin.refreshAllDiaryViews();
 					});
@@ -191,38 +238,6 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.useFirstImageAsArtwork)
 					.onChange(async (value) => {
 						this.plugin.settings.useFirstImageAsArtwork = value;
-						await this.plugin.saveSettings();
-						await this.plugin.refreshAllDiaryViews();
-					});
-			});
-
-		// ── Mood frontmatter key ──
-		new Setting(containerEl)
-			.setName(t("settings.mood-key.name", lang))
-			.setDesc(t("settings.mood-key.desc", lang))
-			.addText((text) => {
-				text
-					.setPlaceholder(t("settings.mood-key.placeholder", lang))
-					.setValue(this.plugin.settings.moodFrontmatterKey)
-					.onChange(async (value) => {
-						const nextValue = value.trim() || DEFAULT_SETTINGS.moodFrontmatterKey;
-						this.plugin.settings.moodFrontmatterKey = nextValue;
-						await this.plugin.saveSettings();
-						await this.plugin.refreshAllDiaryViews();
-					});
-			});
-
-		// ── Mood language ──
-		new Setting(containerEl)
-			.setName(t("settings.mood-lang.name", lang))
-			.setDesc(t("settings.mood-lang.desc", lang))
-			.addDropdown((dropdown) => {
-				dropdown
-					.addOption("en", "English")
-					.addOption("zh", "中文")
-					.setValue(this.plugin.settings.moodLanguage)
-					.onChange(async (value) => {
-						this.plugin.settings.moodLanguage = value as "en" | "zh";
 						await this.plugin.saveSettings();
 						await this.plugin.refreshAllDiaryViews();
 					});

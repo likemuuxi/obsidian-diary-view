@@ -684,9 +684,10 @@ export class DiaryView extends ItemView {
 		});
 
 		const calendarEl = pageEl.createDiv({ cls: "diary-calendar" });
+		const weekendDays = this.plugin.settings.weekendDays;
 		calendarDates.forEach((date) => {
 			const dow = date.date.getDay();
-			const isWeekend = dow === 0 || dow === 6;
+			const isWeekend = weekendDays.includes(dow);
 			const itemEl = calendarEl.createDiv({
 				cls: `diary-calendar-item${isWeekend ? " is-weekend" : ""}${date.id === this.activeDateId ? " is-active" : ""}${date.hasNote ? " has-note" : ""}`,
 			});
@@ -1092,7 +1093,8 @@ export class DiaryView extends ItemView {
 	}
 
 	private resolveMoodIcon(value: string): MoodIconItem | null {
-		const allIcons = getAllMoodIcons(this.plugin.settings.customMoodIcons, this.plugin.settings.moodLanguage);
+		const lang = this.lang();
+		const allIcons = getAllMoodIcons(this.plugin.settings.customMoodIcons, lang);
 		const allIconsEn = getAllMoodIcons(this.plugin.settings.customMoodIcons, "en");
 		
 		return allIcons.find((item) => {
@@ -1157,7 +1159,7 @@ export class DiaryView extends ItemView {
 
 	private renderMoodPickerContent(panelEl: HTMLElement, content: DiaryPageContent): void {
 		const lang = this.lang();
-		const allIcons = getAllMoodIcons(this.plugin.settings.customMoodIcons, this.plugin.settings.moodLanguage);
+		const allIcons = getAllMoodIcons(this.plugin.settings.customMoodIcons, lang);
 		const currentIcon = content.moodIconName;
 
 		const headerEl = panelEl.createDiv({ cls: "diary-mood-picker-header" });
@@ -1310,7 +1312,7 @@ export class DiaryView extends ItemView {
 	];
 
 	private getWeatherOptions(): Array<{ value: string; icon: string; label: string }> {
-		const isZh = this.plugin.settings.weatherLanguage === "zh";
+		const isZh = this.lang() === "zh";
 		return DiaryView.WEATHER_OPTIONS.map((opt) => ({
 			value: isZh ? opt.labelZh : opt.icon,
 			icon: opt.icon,
@@ -1320,7 +1322,8 @@ export class DiaryView extends ItemView {
 
 	private renderDatePickerContent(panelEl: HTMLElement): void {
 		const lang = this.lang();
-		const weekDays = Array.from({ length: 7 }, (_, i) => getShortWeekday(i, lang));
+		const startOfWeek = this.plugin.settings.startOfWeek;
+		const weekDays = Array.from({ length: 7 }, (_, i) => getShortWeekday((startOfWeek + i) % 7, lang));
 
 		const headerEl = panelEl.createDiv({ cls: "diary-date-picker-header" });
 		const prevBtn = headerEl.createEl("button", {
@@ -1399,12 +1402,14 @@ export class DiaryView extends ItemView {
 
 	private renderDatePickerDays(gridEl: HTMLElement): void {
 		const firstDay = new Date(this.datePickerYear, this.datePickerMonth, 1).getDay();
+		const startOfWeek = this.plugin.settings.startOfWeek;
+		const leadingEmpty = (firstDay - startOfWeek + 7) % 7;
 		const daysInMonth = new Date(this.datePickerYear, this.datePickerMonth + 1, 0).getDate();
 		const activeDate = this.getDateById(this.activeDateId);
 		const today = new Date();
 		today.setHours(0, 0, 0, 0);
 
-		for (let i = 0; i < firstDay; i++) {
+		for (let i = 0; i < leadingEmpty; i++) {
 			gridEl.createSpan({ cls: "diary-date-picker-empty" });
 		}
 
@@ -1789,9 +1794,14 @@ export class DiaryView extends ItemView {
 	private buildDateItems(centerDate = new Date()): DiaryDateItem[] {
 		const center = new Date(centerDate);
 		center.setHours(0, 0, 0, 0);
+		const startOfWeek = this.plugin.settings.startOfWeek;
+		const currentDow = center.getDay();
+		const diffToStart = (currentDow - startOfWeek + 7) % 7;
+		const weekStart = new Date(center);
+		weekStart.setDate(center.getDate() - diffToStart);
 		return Array.from({ length: 7 }, (_, index) => {
-			const date = new Date(center);
-			date.setDate(center.getDate() + index - 3);
+			const date = new Date(weekStart);
+			date.setDate(weekStart.getDate() + index);
 			const path = this.getDailyNotePath(date);
 			return {
 				id: this.formatDateId(date),
