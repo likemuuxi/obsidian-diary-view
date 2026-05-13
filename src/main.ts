@@ -2,6 +2,7 @@ import { MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf, normalizePath } fro
 import { DiaryView } from "./diary/DiaryView";
 import { DEFAULT_SETTINGS, DiaryViewSettingTab, type DiaryViewSettings } from "./settings";
 import { VIEW_TYPE_DIARY, type DailyNotesConfig } from "./types";
+import { t } from "./i18n";
 
 const DEFAULT_DAILY_NOTE_FORMAT = "YYYY-MM-DD";
 
@@ -21,13 +22,13 @@ export default class DiaryViewPlugin extends Plugin {
 
 		this.addSettingTab(new DiaryViewSettingTab(this.app, this));
 
-		this.addRibbonIcon("notebook-tabs", "Open diary view", () => {
+		this.addRibbonIcon("notebook-tabs", t("app.ribbon-tooltip", this.settings.language), () => {
 			void this.activateDiaryView();
 		});
 
 		this.addCommand({
 			id: "open-diary-view",
-			name: "Open diary view",
+			name: t("app.command-open", this.settings.language),
 			callback: () => {
 				void this.activateDiaryView();
 			},
@@ -49,7 +50,7 @@ export default class DiaryViewPlugin extends Plugin {
 	async activateDiaryView(leaf?: WorkspaceLeaf): Promise<void> {
 		const targetLeaf = leaf ?? this.app.workspace.getLeaf(false);
 		if (!targetLeaf) {
-			new Notice("No workspace leaf available.");
+			new Notice(t("app.no-leaf", this.settings.language));
 			return;
 		}
 
@@ -130,7 +131,7 @@ export default class DiaryViewPlugin extends Plugin {
 	async openSourceFile(path: string): Promise<void> {
 		const file = this.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) {
-			new Notice("Source file no longer exists.");
+			new Notice(t("app.file-not-found", this.settings.language));
 			return;
 		}
 
