@@ -110,6 +110,7 @@ const dict: Record<string, Record<Language, string>> = {
 	"content.edit-btn":                      { en: "Switch to editing",            zh: "切换到编辑" },
 	"content.textarea-placeholder":          { en: "Write this daily note...",     zh: "开始写日记吧……" },
 	"content.no-note-caption":               { en: "No note yet",                  zh: "暂无日记" },
+	"content.save-notice":                   { en: "Saved.",                       zh: "已保存" },
 
 	// ── Word count ──
 	"wordcount.chars":                       { en: "{count} chars",                zh: "{count} 字" },

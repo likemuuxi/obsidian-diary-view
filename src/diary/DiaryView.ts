@@ -709,7 +709,10 @@ export class DiaryView extends ItemView {
 		});
 		pageEl.dataset.filePath = content.filePath;
 		this.renderPageBindingMarks(pageEl, "left");
-		const isPreview = this.isMarkdownPreview && !isBackFace;
+		const draft = this.drafts.get(content.filePath);
+		const hasBodyContent = (draft && draft.replace(/^#{1,6}\s+.*$/gm, "").trim().length > 0)
+			|| content.sections.some((s) => s.content.trim().length > 0);
+		const isPreview = this.isMarkdownPreview && !isBackFace && hasBodyContent;
 
 		const promptCardEl = pageEl.createDiv({ cls: "diary-prompt-card" });
 		const promptMetaEl = promptCardEl.createDiv({ cls: "diary-prompt-meta" });
@@ -772,7 +775,7 @@ export class DiaryView extends ItemView {
 		previewButtonEl.toggleClass("is-active", isPreview);
 		if (!isBackFace) {
 			previewButtonEl.addEventListener("click", () => {
-				void this.updateMarkdownPreviewMode(!this.isMarkdownPreview);
+				void this.togglePreviewWithSave(content.filePath);
 			});
 		} else {
 			previewButtonEl.disabled = true;
@@ -845,7 +848,8 @@ export class DiaryView extends ItemView {
 				: "";
 		this.updateFooterWordCount(footerCountEl, fullMarkdown);
 
-		if (this.isMarkdownPreview && !isBackFace) {
+		const hasBodyContent = fullMarkdown.replace(/^#{1,6}\s+.*$/gm, "").trim().length > 0;
+		if (this.isMarkdownPreview && !isBackFace && hasBodyContent) {
 			const previewEl = linedPaperEl.createDiv({ cls: "diary-markdown-preview markdown-rendered" });
 			previewEl.addEventListener("dblclick", () => {
 				void this.updateMarkdownPreviewMode(false);
@@ -1082,6 +1086,7 @@ export class DiaryView extends ItemView {
 			cached.weatherIcon = resolvedIcon;
 		}
 
+		this.markFileCreated(filePath);
 		this.updateWeatherIcons(filePath, resolvedIcon);
 	}
 
@@ -1244,6 +1249,7 @@ export class DiaryView extends ItemView {
 			cached.moodDescription = match?.description ?? null;
 		}
 
+		this.markFileCreated(filePath);
 		this.updateMoodDisplay(filePath, iconName, cached?.moodDescription ?? null);
 	}
 
@@ -1624,6 +1630,18 @@ export class DiaryView extends ItemView {
 
 	private createMissingContent(date: DiaryDateItem): DiaryPageContent {
 		const lang = this.lang();
+		const configuredHeading = this.plugin.settings.dailyNoteHeading.trim();
+		const sections = configuredHeading
+			? configuredHeading
+				.split(/[\n,;]+/)
+				.map((h) => h.trim())
+				.filter(Boolean)
+				.map((h) => ({
+					heading: /^#{1,6}\s+/.test(h) ? h : `## ${h}`,
+					content: "",
+				}))
+			: [];
+		const markdown = sections.map((s) => s.heading).join("\n\n");
 		return {
 			imageCaption: t("content.no-note-caption", lang),
 			artworkImage: null,
@@ -1632,8 +1650,8 @@ export class DiaryView extends ItemView {
 			promptPlaceholder: t("quote.placeholder-new", lang),
 			time: date.path,
 			filePath: date.path,
-			sections: [],
-			markdown: "",
+			sections,
+			markdown,
 			wordCount: 0,
 			exists: false,
 			weatherIcon: "sun",
@@ -2054,6 +2072,36 @@ export class DiaryView extends ItemView {
 		}
 
 		return result;
+	}
+
+	private async forceSavePage(filePath: string): Promise<void> {
+		await this.flushPendingNoteSave(filePath);
+		await this.flushPendingPromptSave(filePath);
+		this.markFileCreated(filePath);
+		// new Notice(t("content.save-notice", this.lang()));
+	}
+
+	private markFileCreated(filePath: string): void {
+		const cached = this.renderedContentByPath.get(filePath);
+		const wasMissing = !cached?.exists;
+		if (cached && !cached.exists) {
+			cached.exists = this.app.vault.getAbstractFileByPath(filePath) instanceof TFile;
+		}
+		if (!cached?.exists || !wasMissing) {
+			return;
+		}
+
+		const dateItem = this.dates.find((d) => d.path === filePath);
+		if (dateItem) {
+			dateItem.hasNote = true;
+		}
+
+		void this.render();
+	}
+
+	private async togglePreviewWithSave(filePath: string): Promise<void> {
+		await this.forceSavePage(filePath);
+		await this.updateMarkdownPreviewMode(!this.isMarkdownPreview);
 	}
 
 	private async flushPendingSaves(): Promise<void> {
