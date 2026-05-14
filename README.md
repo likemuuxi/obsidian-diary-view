@@ -4,7 +4,7 @@ English | [中文](https://github.com/likemuuxi/obsidian-diary-view/blob/master/
 
 Diary View is an Obsidian community plugin that turns your daily notes into a notebook-style diary view. It focuses on a calm reading and writing experience: recent daily notes are shown as pages, the current note can be previewed or edited in place, and small details such as a daily quote and weather icon can be stored directly in each note's frontmatter.
 
-<img width="1671" height="1274" alt="image" src="https://github.com/user-attachments/assets/8cd71ded-3ac8-45b6-b1b0-e2b811441fe1" />
+<img width="2139" height="1275" alt="image" src="https://github.com/user-attachments/assets/b00620de-a5cc-4204-8be9-75b4a981c3c7" />
 
 ## Features
 
