@@ -1416,7 +1416,6 @@ export class DiaryView extends ItemView {
 		for (let day = 1; day <= daysInMonth; day++) {
 			const cellDate = new Date(this.datePickerYear, this.datePickerMonth, day);
 			cellDate.setHours(0, 0, 0, 0);
-			const cellId = this.formatDateId(cellDate);
 
 			const isToday = cellDate.getTime() === today.getTime();
 			const isActive = cellDate.getTime() === activeDate.date.getTime();
@@ -2110,8 +2109,8 @@ export class DiaryView extends ItemView {
 	}
 
 	private resizePromptTextarea(textareaEl: HTMLTextAreaElement): void {
-		textareaEl.style.height = "auto";
-		textareaEl.style.height = `${textareaEl.scrollHeight}px`;
+		textareaEl.setCssProps({ height: "auto" });
+		textareaEl.setCssProps({ height: `${textareaEl.scrollHeight}px` });
 	}
 
 	private bindMarkdownLinks(parentEl: HTMLElement, sourcePath: string): void {
@@ -2518,29 +2517,31 @@ export class DiaryView extends ItemView {
 		const contentBeforeCursor = textareaEl.value.slice(0, cursor);
 		const contentAfterCursor = textareaEl.value.slice(cursor) || ".";
 
-		mirrorEl.style.position = "absolute";
-		mirrorEl.style.visibility = "hidden";
-		mirrorEl.style.pointerEvents = "none";
-		mirrorEl.style.whiteSpace = "pre-wrap";
-		mirrorEl.style.wordBreak = "break-word";
-		mirrorEl.style.overflowWrap = "anywhere";
-		mirrorEl.style.boxSizing = "border-box";
-		mirrorEl.style.left = "-9999px";
-		mirrorEl.style.top = "0";
-		mirrorEl.style.width = `${textareaRect.width}px`;
-		mirrorEl.style.font = style.font;
-		mirrorEl.style.fontFamily = style.fontFamily;
-		mirrorEl.style.fontFeatureSettings = style.fontFeatureSettings;
-		mirrorEl.style.fontKerning = style.fontKerning;
-		mirrorEl.style.fontSize = style.fontSize;
-		mirrorEl.style.fontStretch = style.fontStretch;
-		mirrorEl.style.fontStyle = style.fontStyle;
-		mirrorEl.style.fontVariant = style.fontVariant;
-		mirrorEl.style.fontWeight = style.fontWeight;
-		mirrorEl.style.letterSpacing = style.letterSpacing;
-		mirrorEl.style.lineHeight = style.lineHeight;
-		mirrorEl.style.padding = style.padding;
-		mirrorEl.style.border = style.border;
+		mirrorEl.setCssProps({
+			position: "absolute",
+			visibility: "hidden",
+			pointerEvents: "none",
+			whiteSpace: "pre-wrap",
+			wordBreak: "break-word",
+			overflowWrap: "anywhere",
+			boxSizing: "border-box",
+			left: "-9999px",
+			top: "0",
+			width: `${textareaRect.width}px`,
+			font: style.font,
+			fontFamily: style.fontFamily,
+			fontFeatureSettings: style.fontFeatureSettings,
+			fontKerning: style.fontKerning,
+			fontSize: style.fontSize,
+			fontStretch: style.fontStretch,
+			fontStyle: style.fontStyle,
+			fontVariant: style.fontVariant,
+			fontWeight: style.fontWeight,
+			letterSpacing: style.letterSpacing,
+			lineHeight: style.lineHeight,
+			padding: style.padding,
+			border: style.border,
+		});
 
 		const beforeEl = document.createElement("span");
 		beforeEl.textContent = contentBeforeCursor;

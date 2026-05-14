@@ -308,11 +308,13 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 				},
 			});
 			colorInput.value = (icon.color && /^#[0-9a-fA-F]{6}$/.test(icon.color)) ? icon.color : "#9e9e9e";
-			colorInput.style.height = "28px";
-			colorInput.style.width = "40px";
-			colorInput.style.padding = "0";
-			colorInput.style.border = "none";
-			colorInput.style.cursor = "pointer";
+			colorInput.setCssProps({
+				height: "28px",
+				width: "40px",
+				padding: "0",
+				border: "none",
+				cursor: "pointer",
+			});
 
 			const updatePreview = (): void => {
 				iconPreview.empty();

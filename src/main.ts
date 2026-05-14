@@ -27,7 +27,7 @@ export default class DiaryViewPlugin extends Plugin {
 		});
 
 		this.addCommand({
-			id: "open-diary-view",
+			id: "open",
 			name: t("app.command-open", this.settings.language),
 			callback: () => {
 				void this.activateDiaryView();
@@ -40,10 +40,10 @@ export default class DiaryViewPlugin extends Plugin {
 		this.registerEvent(this.app.vault.on("rename", (file) => this.handleVaultChange(file)));
 	}
 
-	async onunload(): Promise<void> {
+	onunload(): void {
 		const diaryLeaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_DIARY);
 		for (const leaf of diaryLeaves) {
-			await leaf.setViewState({ type: "empty" });
+			void leaf.setViewState({ type: "empty" });
 		}
 	}
 
@@ -58,7 +58,7 @@ export default class DiaryViewPlugin extends Plugin {
 			type: VIEW_TYPE_DIARY,
 			active: true,
 		});
-		this.app.workspace.revealLeaf(targetLeaf);
+		void this.app.workspace.revealLeaf(targetLeaf);
 	}
 
 	async refreshAllDiaryViews(): Promise<void> {
@@ -73,7 +73,7 @@ export default class DiaryViewPlugin extends Plugin {
 	}
 
 	async loadSettings(): Promise<void> {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<DiaryViewSettings>);
 	}
 
 	async saveSettings(): Promise<void> {
