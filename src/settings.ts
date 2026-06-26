@@ -121,17 +121,19 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 			});
 			checkbox.checked = checked;
 			labelEl.createSpan({ text: t(`calendar.weekday.short.${dow}`, lang) });
-			checkbox.addEventListener("change", async () => {
-				if (checkbox.checked) {
-					if (!this.plugin.settings.weekendDays.includes(dow)) {
-						this.plugin.settings.weekendDays.push(dow);
-						this.plugin.settings.weekendDays.sort((a, b) => a - b);
+			checkbox.addEventListener("change", () => {
+				void (async () => {
+					if (checkbox.checked) {
+						if (!this.plugin.settings.weekendDays.includes(dow)) {
+							this.plugin.settings.weekendDays.push(dow);
+							this.plugin.settings.weekendDays.sort((a, b) => a - b);
+						}
+					} else {
+						this.plugin.settings.weekendDays = this.plugin.settings.weekendDays.filter((d) => d !== dow);
 					}
-				} else {
-					this.plugin.settings.weekendDays = this.plugin.settings.weekendDays.filter((d) => d !== dow);
-				}
-				await this.plugin.saveSettings();
-				await this.plugin.refreshAllDiaryViews();
+					await this.plugin.saveSettings();
+					await this.plugin.refreshAllDiaryViews();
+				})();
 			});
 		}
 
@@ -324,24 +326,30 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 				}
 			};
 
-			nameInput.addEventListener("input", async () => {
-				this.plugin.settings.customMoodIcons[index]!.name = nameInput.value.trim();
-				updatePreview();
-				await this.plugin.saveSettings();
-				await this.plugin.refreshAllDiaryViews();
+			nameInput.addEventListener("input", () => {
+				void (async () => {
+					this.plugin.settings.customMoodIcons[index]!.name = nameInput.value.trim();
+					updatePreview();
+					await this.plugin.saveSettings();
+					await this.plugin.refreshAllDiaryViews();
+				})();
 			});
 
-			descInput.addEventListener("input", async () => {
-				this.plugin.settings.customMoodIcons[index]!.description = descInput.value.trim();
-				await this.plugin.saveSettings();
-				await this.plugin.refreshAllDiaryViews();
+			descInput.addEventListener("input", () => {
+				void (async () => {
+					this.plugin.settings.customMoodIcons[index]!.description = descInput.value.trim();
+					await this.plugin.saveSettings();
+					await this.plugin.refreshAllDiaryViews();
+				})();
 			});
 
-			colorInput.addEventListener("input", async () => {
-				this.plugin.settings.customMoodIcons[index]!.color = colorInput.value.trim();
-				updatePreview();
-				await this.plugin.saveSettings();
-				await this.plugin.refreshAllDiaryViews();
+			colorInput.addEventListener("input", () => {
+				void (async () => {
+					this.plugin.settings.customMoodIcons[index]!.color = colorInput.value.trim();
+					updatePreview();
+					await this.plugin.saveSettings();
+					await this.plugin.refreshAllDiaryViews();
+				})();
 			});
 
 			setting.addExtraButton((extraBtn) => {

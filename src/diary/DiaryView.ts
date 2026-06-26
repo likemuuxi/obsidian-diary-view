@@ -464,7 +464,7 @@ export class DiaryView extends ItemView {
 		}
 
 		const cloneEl = sourceEl.cloneNode(true);
-		if (!(cloneEl instanceof HTMLElement)) {
+		if (!cloneEl.instanceOf(HTMLElement)) {
 			targetEl.removeClass("is-visible");
 			return;
 		}
@@ -932,7 +932,7 @@ export class DiaryView extends ItemView {
 		this.datePickerYear = activeDate.date.getFullYear();
 		this.datePickerOpen = true;
 
-		const panelEl = document.body.createDiv({ cls: "diary-date-picker" });
+		const panelEl = activeDocument.body.createDiv({ cls: "diary-date-picker" });
 		this.renderDatePickerContent(panelEl);
 
 		const anchorRect = anchorEl.getBoundingClientRect();
@@ -960,11 +960,11 @@ export class DiaryView extends ItemView {
 			}
 		};
 
-		document.addEventListener("click", onClickOutside, true);
-		document.addEventListener("keydown", onKeyDown);
+		activeDocument.addEventListener("click", onClickOutside, true);
+		activeDocument.addEventListener("keydown", onKeyDown);
 		this.datePickerCleanup = () => {
-			document.removeEventListener("click", onClickOutside, true);
-			document.removeEventListener("keydown", onKeyDown);
+			activeDocument.removeEventListener("click", onClickOutside, true);
+			activeDocument.removeEventListener("keydown", onKeyDown);
 			panelEl.remove();
 		};
 	}
@@ -985,7 +985,7 @@ export class DiaryView extends ItemView {
 
 		this.weatherPickerOpen = true;
 
-		const panelEl = document.body.createDiv({ cls: "diary-weather-picker" });
+		const panelEl = activeDocument.body.createDiv({ cls: "diary-weather-picker" });
 		this.renderWeatherPickerContent(panelEl, content);
 
 		const anchorRect = anchorEl.getBoundingClientRect();
@@ -1013,11 +1013,11 @@ export class DiaryView extends ItemView {
 			}
 		};
 
-		document.addEventListener("click", onClickOutside, true);
-		document.addEventListener("keydown", onKeyDown);
+		activeDocument.addEventListener("click", onClickOutside, true);
+		activeDocument.addEventListener("keydown", onKeyDown);
 		this.weatherPickerCleanup = () => {
-			document.removeEventListener("click", onClickOutside, true);
-			document.removeEventListener("keydown", onKeyDown);
+			activeDocument.removeEventListener("click", onClickOutside, true);
+			activeDocument.removeEventListener("keydown", onKeyDown);
 			panelEl.remove();
 		};
 	}
@@ -1117,7 +1117,7 @@ export class DiaryView extends ItemView {
 
 		this.moodPickerOpen = true;
 
-		const panelEl = document.body.createDiv({ cls: "diary-mood-picker" });
+		const panelEl = activeDocument.body.createDiv({ cls: "diary-mood-picker" });
 		this.renderMoodPickerContent(panelEl, content);
 
 		const anchorRect = anchorEl.getBoundingClientRect();
@@ -1145,11 +1145,11 @@ export class DiaryView extends ItemView {
 			}
 		};
 
-		document.addEventListener("click", onClickOutside, true);
-		document.addEventListener("keydown", onKeyDown);
+		activeDocument.addEventListener("click", onClickOutside, true);
+		activeDocument.addEventListener("keydown", onKeyDown);
 		this.moodPickerCleanup = () => {
-			document.removeEventListener("click", onClickOutside, true);
-			document.removeEventListener("keydown", onKeyDown);
+			activeDocument.removeEventListener("click", onClickOutside, true);
+			activeDocument.removeEventListener("keydown", onKeyDown);
 			panelEl.remove();
 		};
 	}
@@ -1503,17 +1503,38 @@ export class DiaryView extends ItemView {
 	private renderMobileSpineRing(parentEl: HTMLElement, offset: number): void {
 		const ringEl = parentEl.createDiv({ cls: "diary-mobile-spine-ring" });
 		ringEl.style.setProperty("--diary-mobile-ring-offset", `${offset}px`);
-		ringEl.innerHTML = `
-			<svg width="40" height="16" viewBox="0 0 40 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-				<circle cx="8" cy="8" r="3.5" class="diary-ring-hole" />
-				<circle cx="8" cy="8" r="2.5" class="diary-ring-core" />
-				<circle cx="32" cy="8" r="3.5" class="diary-ring-hole" />
-				<circle cx="32" cy="8" r="2.5" class="diary-ring-core" />
-				<path d="M 6 8.5 C 14 1, 26 1, 34 8.5" class="diary-ring-metal diary-ring-metal-main" />
-				<path d="M 6 8 C 14 1, 26 1, 34 8" class="diary-ring-metal diary-ring-metal-highlight" />
-				<path d="M 6 9 C 14 2, 26 2, 34 9" class="diary-ring-metal diary-ring-metal-shadow" />
-			</svg>
-		`;
+
+		const ns = "http://www.w3.org/2000/svg";
+		const svg = activeDocument.createElementNS(ns, "svg") as SVGSVGElement;
+		svg.setAttribute("width", "40");
+		svg.setAttribute("height", "16");
+		svg.setAttribute("viewBox", "0 0 40 16");
+		svg.setAttribute("fill", "none");
+		svg.setAttribute("aria-hidden", "true");
+		ringEl.appendChild(svg);
+
+		const addCircle = (cx: string, cy: string, r: string, cls: string) => {
+			const el = activeDocument.createElementNS(ns, "circle");
+			el.setAttribute("cx", cx);
+			el.setAttribute("cy", cy);
+			el.setAttribute("r", r);
+			el.setAttribute("class", cls);
+			svg.appendChild(el);
+		};
+		const addPath = (d: string, cls: string) => {
+			const el = activeDocument.createElementNS(ns, "path");
+			el.setAttribute("d", d);
+			el.setAttribute("class", cls);
+			svg.appendChild(el);
+		};
+
+		addCircle("8", "8", "3.5", "diary-ring-hole");
+		addCircle("8", "8", "2.5", "diary-ring-core");
+		addCircle("32", "8", "3.5", "diary-ring-hole");
+		addCircle("32", "8", "2.5", "diary-ring-core");
+		addPath("M 6 8.5 C 14 1, 26 1, 34 8.5", "diary-ring-metal diary-ring-metal-main");
+		addPath("M 6 8 C 14 1, 26 1, 34 8", "diary-ring-metal diary-ring-metal-highlight");
+		addPath("M 6 9 C 14 2, 26 2, 34 9", "diary-ring-metal diary-ring-metal-shadow");
 	}
 
 	private handleDateChange(nextDateId: string): void {
@@ -1544,7 +1565,7 @@ export class DiaryView extends ItemView {
 	}
 
 	private isTurnPluginAvailable(): boolean {
-		const turnProbe = $(document.createElement("div")) as Partial<TurnBook>;
+		const turnProbe = $(activeDocument.createElement("div")) as Partial<TurnBook>;
 		return typeof turnProbe.turn === "function";
 	}
 
@@ -2418,7 +2439,7 @@ export class DiaryView extends ItemView {
 		});
 		textareaEl.addEventListener("blur", () => {
 			window.setTimeout(() => {
-				if (document.activeElement === textareaEl) {
+				if (activeDocument.activeElement === textareaEl) {
 					return;
 				}
 				hidePanel();
@@ -2558,7 +2579,7 @@ export class DiaryView extends ItemView {
 	private measureTextareaCaretOffset(
 		textareaEl: HTMLTextAreaElement,
 	): { left: number; top: number; lineHeight: number } {
-		const mirrorEl = document.createElement("div");
+		const mirrorEl = activeDocument.createElement("div");
 		const style = window.getComputedStyle(textareaEl);
 		const textareaRect = textareaEl.getBoundingClientRect();
 		const cursor = textareaEl.selectionStart ?? textareaEl.value.length;
@@ -2591,19 +2612,19 @@ export class DiaryView extends ItemView {
 			border: style.border,
 		});
 
-		const beforeEl = document.createElement("span");
+		const beforeEl = activeDocument.createElement("span");
 		beforeEl.textContent = contentBeforeCursor;
 		mirrorEl.appendChild(beforeEl);
 
-		const caretEl = document.createElement("span");
+		const caretEl = activeDocument.createElement("span");
 		caretEl.textContent = "\u200b";
 		mirrorEl.appendChild(caretEl);
 
-		const afterEl = document.createElement("span");
+		const afterEl = activeDocument.createElement("span");
 		afterEl.textContent = contentAfterCursor;
 		mirrorEl.appendChild(afterEl);
 
-		document.body.appendChild(mirrorEl);
+		activeDocument.body.appendChild(mirrorEl);
 
 		const lineHeight = Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.6 || 22;
 		const left = caretEl.offsetLeft - textareaEl.scrollLeft;
