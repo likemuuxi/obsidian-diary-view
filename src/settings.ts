@@ -8,10 +8,13 @@ export interface CustomFrontmatterOption {
 	color?: string;
 }
 
+export type CustomFrontmatterPickerType = "options" | "text";
+
 export interface CustomFrontmatterPicker {
 	id: string;
 	key: string;
 	label: string;
+	type?: CustomFrontmatterPickerType;
 	options: CustomFrontmatterOption[];
 }
 
@@ -148,6 +151,7 @@ export function createBuiltinWeatherPicker(weatherKey: string, language: Languag
 		id: "builtin_weather",
 		key: weatherKey,
 		label: language === "zh" ? "\u5929\u6c14" : "Weather",
+		type: "options",
 		options: createBuiltinOptions(WEATHER_OPTIONS_BUILTIN, language),
 	};
 }
@@ -157,8 +161,17 @@ export function createBuiltinMoodPicker(moodKey: string, language: Language): Cu
 		id: "builtin_mood",
 		key: moodKey,
 		label: language === "zh" ? "\u5fc3\u60c5" : "Mood",
+		type: "options",
 		options: createBuiltinOptions(MOOD_ICONS_BUILTIN, language),
 	};
+}
+
+function getPickerType(picker: CustomFrontmatterPicker): CustomFrontmatterPickerType {
+	return picker.type ?? "options";
+}
+
+function isBuiltinPicker(picker: CustomFrontmatterPicker): boolean {
+	return picker.id === "builtin_weather" || picker.id === "builtin_mood";
 }
 
 function hueToRgb(p: number, q: number, t: number): number {
@@ -200,6 +213,47 @@ function restoreBuiltinPickerOptions(settings: DiaryViewSettings, language: Lang
 	];
 }
 
+function localizeBuiltinPicker(
+	picker: CustomFrontmatterPicker,
+	definitions: BuiltinPickerOptionDefinition[],
+	language: Language,
+	label: string,
+): CustomFrontmatterPicker {
+	const colorsByIcon = new Map<string, string>();
+	for (const option of picker.options) {
+		if (option.icon && option.color) {
+			colorsByIcon.set(option.icon, option.color);
+		}
+	}
+
+	return {
+		...picker,
+		label,
+		options: definitions.map((option) => {
+			const color = colorsByIcon.get(option.icon);
+			return {
+				icon: option.icon,
+				name: localizeBuiltinName(option, language),
+				...(color ? { color } : {}),
+			};
+		}),
+	};
+}
+
+function localizeBuiltinPickers(settings: DiaryViewSettings, language: Language): void {
+	settings.customFrontmatterPickers = (settings.customFrontmatterPickers ?? []).map((picker) => {
+		if (picker.id === "builtin_weather") {
+			return localizeBuiltinPicker(picker, WEATHER_OPTIONS_BUILTIN, language, language === "zh" ? "\u5929\u6c14" : "Weather");
+		}
+
+		if (picker.id === "builtin_mood") {
+			return localizeBuiltinPicker(picker, MOOD_ICONS_BUILTIN, language, language === "zh" ? "\u5fc3\u60c5" : "Mood");
+		}
+
+		return picker;
+	});
+}
+
 const defaultLanguage = detectLanguage();
 
 export const DEFAULT_SETTINGS: DiaryViewSettings = {
@@ -236,7 +290,6 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 		const lang = this.lang();
 		containerEl.empty();
 
-		// 闂傚倷绀侀崯鍧楀储濠婂牆纾婚柟鍓х帛閻撳啴鏌涜箛鎿冩Ц濞?Language 闂傚倷绀侀崯鍧楀储濠婂牆纾婚柟鍓х帛閻撳啴鏌涜箛鎿冩Ц濞?
 		new Setting(containerEl)
 			.setName(t("settings.language.name", lang))
 			.setDesc(t("settings.language.desc", lang))
@@ -247,6 +300,7 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 				dropdown.setValue(this.plugin.settings.language)
 					.onChange(async (value) => {
 						this.plugin.settings.language = value as Language;
+						localizeBuiltinPickers(this.plugin.settings, this.plugin.settings.language);
 						await this.plugin.saveSettings();
 						this.display();
 						await this.plugin.refreshAllDiaryViews();
@@ -302,7 +356,6 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 			});
 		}
 
-		// 闂傚倷绀侀崯鍧楀储濠婂牆纾婚柟鍓х帛閻撳啴鏌涜箛鎿冩Ц濞?Daily note heading 闂傚倷绀侀崯鍧楀储濠婂牆纾婚柟鍓х帛閻撳啴鏌涜箛鎿冩Ц濞?
 		new Setting(containerEl)
 			.setName(t("settings.daily-note-heading.name", lang))
 			.setDesc(t("settings.daily-note-heading.desc", lang))
@@ -318,7 +371,6 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					});
 			});
 
-		// 闂傚倷绀侀崯鍧楀储濠婂牆纾婚柟鍓х帛閻撳啴鏌涜箛鎿冩Ц濞?Quote frontmatter key 闂傚倷绀侀崯鍧楀储濠婂牆纾婚柟鍓х帛閻撳啴鏌涜箛鎿冩Ц濞?
 		new Setting(containerEl)
 			.setName(t("settings.quote-key.name", lang))
 			.setDesc(t("settings.quote-key.desc", lang))
@@ -334,7 +386,6 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					});
 			});
 
-		// 闂傚倷绀侀崯鍧楀储濠婂牆纾婚柟鍓х帛閻撳啴鏌涜箛鎿冩Ц濞?Daily quote API 闂傚倷绀侀崯鍧楀储濠婂牆纾婚柟鍓х帛閻撳啴鏌涜箛鎿冩Ц濞?
 		new Setting(containerEl)
 			.setName(t("settings.quote-api.name", lang))
 			.setDesc(t("settings.quote-api.desc", lang))
@@ -349,7 +400,6 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					});
 			});
 
-		// 闂傚倷绀侀崯鍧楀储濠婂牆纾婚柟鍓х帛閻撳啴鏌涜箛鎿冩Ц濞?Image frontmatter key 闂傚倷绀侀崯鍧楀储濠婂牆纾婚柟鍓х帛閻撳啴鏌涜箛鎿冩Ц濞?
 		new Setting(containerEl)
 			.setName(t("settings.image-key.name", lang))
 			.setDesc(t("settings.image-key.desc", lang))
@@ -364,7 +414,6 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 				});
 		});
 
-		// 闂傚倷绀侀崯鍧楀储濠婂牆纾婚柟鍓х帛閻撳啴鏌涜箛鎿冩Ц濞?Image description frontmatter key 闂傚倷绀侀崯鍧楀储濠婂牆纾婚柟鍓х帛閻撳啴鏌涜箛鎿冩Ц濞?
 		new Setting(containerEl)
 			.setName(t("settings.image-desc-key.name", lang))
 			.setDesc(t("settings.image-desc-key.desc", lang))
@@ -379,7 +428,6 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					});
 			});
 
-		// 闂傚倷绀侀崯鍧楀储濠婂牆纾婚柟鍓х帛閻撳啴鏌涜箛鎿冩Ц濞?Use first image as artwork 闂傚倷绀侀崯鍧楀储濠婂牆纾婚柟鍓х帛閻撳啴鏌涜箛鎿冩Ц濞?
 		new Setting(containerEl)
 			.setName(t("settings.use-first-image.name", lang))
 			.setDesc(t("settings.use-first-image.desc", lang))
@@ -393,7 +441,6 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					});
 			});
 
-		// 闂傚倷绀侀崯鍧楀储濠婂牆纾婚柟鍓х帛閻撳啴鏌涜箛鎿冩Ц濞?Frontmatter pickers (weather, mood, custom) 闂傚倷绀侀崯鍧楀储濠婂牆纾婚柟鍓х帛閻撳啴鏌涜箛鎿冩Ц濞?
 		containerEl.createDiv({ cls: "diary-settings-mood-heading", text: t("settings.custom-picker.heading", lang) });
 		containerEl.createDiv({
 			cls: "diary-settings-mood-desc",
@@ -413,6 +460,7 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 							id: `custom_${Date.now()}`,
 							key: "",
 							label: "",
+							type: "options",
 							options: [],
 						});
 						await this.plugin.saveSettings();
@@ -448,6 +496,8 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 			cardEl.toggleClass("is-collapsed", !isExpanded);
 
 			const headerEl = cardEl.createDiv({ cls: "diary-settings-picker-card-header" });
+			const pickerType = getPickerType(picker);
+			const isBuiltin = isBuiltinPicker(picker);
 			const toggleEl = headerEl.createEl("button", {
 				cls: "diary-settings-picker-card-toggle",
 				attr: {
@@ -463,7 +513,9 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 			summaryEl.createSpan({ cls: "diary-settings-picker-card-title", text: title });
 			summaryEl.createSpan({
 				cls: "diary-settings-picker-card-meta",
-				text: `${picker.options.length} ${t("settings.custom-picker.option-count", lang)}`,
+				text: pickerType === "text"
+					? t("settings.custom-picker.type-text", lang)
+					: `${picker.options.length} ${t("settings.custom-picker.option-count", lang)}`,
 			});
 			toggleEl.addEventListener("click", () => {
 				if (this.expandedPickerIds.has(pickerId)) {
@@ -474,43 +526,45 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 				this.display();
 			});
 
-			headerEl.createEl("button", {
-				cls: "diary-settings-picker-card-action",
-				attr: {
-					type: "button",
-					"aria-label": t("settings.custom-picker.reset-colors-tooltip", lang),
-					title: t("settings.custom-picker.reset-colors-tooltip", lang),
-				},
-			}, (btnEl) => {
-				setIcon(btnEl, "rotate-ccw");
-				btnEl.addEventListener("click", async () => {
-					for (const option of this.plugin.settings.customFrontmatterPickers[index]!.options) {
-						delete option.color;
-					}
-					await this.plugin.saveSettings();
-					this.display();
-					await this.plugin.refreshAllDiaryViews();
+			if (pickerType === "options") {
+				headerEl.createEl("button", {
+					cls: "diary-settings-picker-card-action",
+					attr: {
+						type: "button",
+						"aria-label": t("settings.custom-picker.reset-colors-tooltip", lang),
+						title: t("settings.custom-picker.reset-colors-tooltip", lang),
+					},
+				}, (btnEl) => {
+					setIcon(btnEl, "rotate-ccw");
+					btnEl.addEventListener("click", async () => {
+						for (const option of this.plugin.settings.customFrontmatterPickers[index]!.options) {
+							delete option.color;
+						}
+						await this.plugin.saveSettings();
+						this.display();
+						await this.plugin.refreshAllDiaryViews();
+					});
 				});
-			});
 
-			headerEl.createEl("button", {
-				cls: "diary-settings-picker-card-action",
-				attr: {
-					type: "button",
-					"aria-label": t("settings.custom-picker.random-colors-tooltip", lang),
-					title: t("settings.custom-picker.random-colors-tooltip", lang),
-				},
-			}, (btnEl) => {
-				setIcon(btnEl, "shuffle");
-				btnEl.addEventListener("click", async () => {
-					for (const option of this.plugin.settings.customFrontmatterPickers[index]!.options) {
-						option.color = randomHexColor();
-					}
-					await this.plugin.saveSettings();
-					this.display();
-					await this.plugin.refreshAllDiaryViews();
+				headerEl.createEl("button", {
+					cls: "diary-settings-picker-card-action",
+					attr: {
+						type: "button",
+						"aria-label": t("settings.custom-picker.random-colors-tooltip", lang),
+						title: t("settings.custom-picker.random-colors-tooltip", lang),
+					},
+				}, (btnEl) => {
+					setIcon(btnEl, "shuffle");
+					btnEl.addEventListener("click", async () => {
+						for (const option of this.plugin.settings.customFrontmatterPickers[index]!.options) {
+							option.color = randomHexColor();
+						}
+						await this.plugin.saveSettings();
+						this.display();
+						await this.plugin.refreshAllDiaryViews();
+					});
 				});
-			});
+			}
 
 			const bodyEl = cardEl.createDiv({ cls: "diary-settings-picker-card-body" });
 			bodyEl.toggleClass("is-hidden", !isExpanded);
@@ -548,6 +602,24 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 				})();
 			});
 
+			if (!isBuiltin) {
+				new Setting(bodyEl)
+					.setClass("diary-settings-picker-type-setting")
+					.setName(t("settings.custom-picker.type-name", lang))
+					.addDropdown((dropdown) => {
+						dropdown
+							.addOption("options", t("settings.custom-picker.type-options", lang))
+							.addOption("text", t("settings.custom-picker.type-text", lang))
+							.setValue(pickerType)
+							.onChange(async (value) => {
+								this.plugin.settings.customFrontmatterPickers[index]!.type = value as CustomFrontmatterPickerType;
+								await this.plugin.saveSettings();
+								this.display();
+								await this.plugin.refreshAllDiaryViews();
+							});
+					});
+			}
+
 			headerEl.createEl("button", {
 				cls: "diary-settings-picker-card-remove",
 				attr: {
@@ -565,6 +637,11 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					await this.plugin.refreshAllDiaryViews();
 				});
 			});
+
+			if (pickerType === "text") {
+				bodyEl.createDiv({ cls: "diary-settings-picker-help", text: t("settings.custom-picker.text-help", lang) });
+				continue;
+			}
 
 			const optionsWrap = bodyEl.createDiv({ cls: "diary-settings-picker-options" });
 			const options = picker.options;

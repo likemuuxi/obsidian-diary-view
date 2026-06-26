@@ -180,6 +180,11 @@
 	overflow: hidden;
 }
 
+.diary-page-left {
+	min-height: 0;
+	overflow: hidden;
+}
+
 .diary-page-right .diary-prompt-card {
 	flex: 0 1 auto;
 	min-height: 0;
@@ -1768,34 +1773,23 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	flex-wrap: nowrap;
 	gap: 8px;
+	width: 100%;
 	max-width: 100%;
-	overflow-x: auto;
-	scrollbar-width: thin;
-	scrollbar-color: color-mix(in srgb, var(--diary-muted) 50%, transparent) transparent;
-	padding: 4px 2px 8px;
-}
-
-.diary-mood-scroll::-webkit-scrollbar {
-	height: 6px;
-}
-
-.diary-mood-scroll::-webkit-scrollbar-track {
-	background: transparent;
-}
-
-.diary-mood-scroll::-webkit-scrollbar-thumb {
-	background: color-mix(in srgb, var(--diary-muted) 42%, transparent);
-	border-radius: 999px;
+	overflow: visible;
+	padding: 4px 2px;
 }
 
 .diary-frontmatter-trigger {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	flex: 0 0 auto;
+	flex: 0 1 auto;
 	gap: 6px;
 	box-sizing: border-box;
+	min-width: 0;
+	max-width: 100%;
 	min-height: 34px;
 	padding: 6px 16px;
 	border: 1px dashed color-mix(in srgb, #d97706 30%, transparent);
@@ -1849,6 +1843,10 @@
 }
 
 .diary-frontmatter-text {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 	font-size: 12px;
 	font-weight: 600;
 	line-height: 18px;
@@ -1861,6 +1859,10 @@
 }
 
 .diary-frontmatter-placeholder {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 	font-size: 12px;
 	font-weight: 600;
 	line-height: 18px;
@@ -1871,9 +1873,10 @@
 .diary-mood-picker {
 	position: fixed;
 	z-index: 9999;
-	width: fit-content;
-	min-width: 220px;
-	max-width: 340px;
+	box-sizing: border-box;
+	width: min(340px, calc(100vw - 16px));
+	min-width: min(220px, calc(100vw - 16px));
+	max-width: min(340px, calc(100vw - 16px));
 	max-height: min(420px, 80vh);
 	padding: 16px;
 	border: 1px solid #e2e8f0;
@@ -1906,6 +1909,10 @@
 }
 
 .diary-mood-picker-title {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 	font-size: 13px;
 	font-weight: 800;
 	letter-spacing: 0.06em;
@@ -1962,12 +1969,19 @@
 
 .diary-mood-picker-grid {
 	display: grid;
-	grid-template-columns: repeat(2, 1fr);
+	grid-template-columns: repeat(2, minmax(0, 1fr));
 	padding: 5px;
 	gap: 6px;
 	overflow-y: auto;
+	overflow-x: hidden;
 	flex: 1;
 	min-height: 0;
+}
+
+@media (max-width: 280px) {
+	.diary-mood-picker-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
 }
 
 .diary-mood-picker-item {
@@ -1975,6 +1989,7 @@
 	align-items: center;
 	justify-content: flex-start;
 	gap: 10px;
+	min-width: 0;
 	padding: 8px 12px;
 	border: 1px solid #e2e8f0;
 	border-radius: 12px;
@@ -2034,12 +2049,55 @@
 }
 
 .diary-mood-picker-label {
+	min-width: 0;
 	font-size: 12px;
 	font-weight: 600;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+.diary-custom-text-picker-form {
+	display: flex;
+	gap: 8px;
+	padding: 5px;
 	min-width: 0;
+}
+
+.diary-custom-text-picker-input {
+	flex: 1;
+	min-width: 0;
+	height: 34px;
+	padding: 6px 10px;
+	border: 1px solid #e2e8f0;
+	border-radius: 10px;
+	background: transparent;
+	color: #374151;
+	font-size: 13px;
+}
+
+.theme-dark .diary-custom-text-picker-input {
+	border-color: #333333;
+	color: #d4d4d4;
+}
+
+.diary-custom-text-picker-save {
+	flex: 0 0 auto;
+	height: 34px;
+	padding: 0 12px;
+	border: 1px solid color-mix(in srgb, #60a5fa 40%, transparent);
+	border-radius: 10px;
+	background: color-mix(in srgb, #60a5fa 12%, transparent) !important;
+	box-shadow: none !important;
+	color: #2563eb;
+	font-size: 12px;
+	font-weight: 700;
+	cursor: pointer;
+}
+
+.theme-dark .diary-custom-text-picker-save {
+	border-color: color-mix(in srgb, #60a5fa 35%, #333333);
+	color: #93c5fd;
 }
 
 .diary-settings-mood-heading {
@@ -2322,6 +2380,21 @@
 .diary-settings-picker-option-add:hover {
 	border-color: var(--interactive-accent);
 	color: var(--text-normal);
+}
+
+.diary-settings-picker-type-setting {
+	padding: 0;
+	border-top: 0;
+}
+
+.diary-settings-picker-type-setting .setting-item-info {
+	flex: 0 0 auto;
+}
+
+.diary-settings-picker-help {
+	color: var(--text-muted);
+	font-size: 12px;
+	line-height: 1.4;
 }
 
 @media (max-width: 640px) {

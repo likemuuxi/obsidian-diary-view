@@ -27,7 +27,7 @@ import {
 	type WikilinkSuggestion,
 } from "./wikilink";
 import { t, tCount, getMonthName, getShortWeekday, type Language } from "../i18n";
-import type { CustomFrontmatterPicker } from "../settings";
+import type { CustomFrontmatterPicker, CustomFrontmatterPickerType } from "../settings";
 
 const AUTOSAVE_DELAY_MS = 1500;
 const DESKTOP_BREAKPOINT_QUERY = "(min-width: 960px)";
@@ -672,10 +672,16 @@ export class DiaryView extends ItemView {
 			triggerEl.dataset.filePath = content.filePath;
 			triggerEl.dataset.pickerKey = key;
 			const currentValue = content.customFrontmatterValues[key] ?? null;
+			const pickerType = this.getCustomPickerType(picker);
 			const matchedOption = currentValue
 				? picker.options.find((opt) => opt.name === currentValue || opt.icon === currentValue)
 				: null;
-			if (matchedOption) {
+			if (pickerType === "text" && currentValue) {
+				triggerEl.addClass("has-value");
+				const iconEl = triggerEl.createDiv({ cls: "diary-frontmatter-icon" });
+				setIcon(iconEl, "tag");
+				triggerEl.createSpan({ cls: "diary-frontmatter-text", text: currentValue });
+			} else if (matchedOption) {
 				triggerEl.addClass("has-value");
 				const iconEl = triggerEl.createDiv({ cls: "diary-frontmatter-icon" });
 				if (matchedOption.color) {
@@ -1069,6 +1075,7 @@ export class DiaryView extends ItemView {
 		const lang = this.lang();
 		const key = picker.key.trim();
 		const currentValue = content.customFrontmatterValues[key] ?? null;
+		const pickerType = this.getCustomPickerType(picker);
 
 		const headerEl = panelEl.createDiv({ cls: "diary-mood-picker-header" });
 		headerEl.createDiv({ cls: "diary-mood-picker-title", text: picker.label || key });
@@ -1087,6 +1094,11 @@ export class DiaryView extends ItemView {
 				this.closeCustomPicker();
 				void this.applyCustomFrontmatterChange(content.filePath, key, null);
 			});
+		}
+
+		if (pickerType === "text") {
+			this.renderCustomTextPickerContent(panelEl, content, key, currentValue);
+			return;
 		}
 
 		const gridEl = panelEl.createDiv({ cls: "diary-mood-picker-grid" });
@@ -1115,6 +1127,41 @@ export class DiaryView extends ItemView {
 				void this.applyCustomFrontmatterChange(content.filePath, key, opt.name);
 			});
 		}
+	}
+
+	private renderCustomTextPickerContent(panelEl: HTMLElement, content: DiaryPageContent, key: string, currentValue: string | null): void {
+		const lang = this.lang();
+		const formEl = panelEl.createDiv({ cls: "diary-custom-text-picker-form" });
+		const inputEl = formEl.createEl("input", {
+			cls: "diary-custom-text-picker-input",
+			attr: {
+				type: "text",
+				placeholder: t("custom-picker.text-placeholder", lang),
+				value: currentValue ?? "",
+			},
+		});
+		const saveBtn = formEl.createEl("button", {
+			cls: "diary-custom-text-picker-save",
+			attr: { type: "button" },
+			text: t("custom-picker.save", lang),
+		});
+		const saveValue = (): void => {
+			const nextValue = inputEl.value.trim();
+			this.closeCustomPicker();
+			void this.applyCustomFrontmatterChange(content.filePath, key, nextValue || null);
+		};
+		inputEl.addEventListener("keydown", (evt) => {
+			if (evt.key === "Enter") {
+				evt.preventDefault();
+				saveValue();
+			}
+		});
+		saveBtn.addEventListener("click", (evt) => {
+			evt.stopPropagation();
+			saveValue();
+		});
+		inputEl.focus();
+		inputEl.select();
 	}
 
 	private async applyCustomFrontmatterChange(filePath: string, key: string, value: string | null): Promise<void> {
@@ -1161,12 +1208,17 @@ export class DiaryView extends ItemView {
 			const picker = pickers.find((p) => p.key.trim() === key);
 			if (!picker) continue;
 			const currentValue = cached?.customFrontmatterValues[key] ?? null;
+			const pickerType = this.getCustomPickerType(picker);
 			const matchedOption = currentValue
 				? picker.options.find((opt) => opt.name === currentValue || opt.icon === currentValue)
 				: null;
 			triggerEl.empty();
-			triggerEl.classList.toggle("has-value", !!matchedOption);
-			if (matchedOption) {
+			triggerEl.classList.toggle("has-value", pickerType === "text" ? !!currentValue : !!matchedOption);
+			if (pickerType === "text" && currentValue) {
+				const iconEl = triggerEl.createDiv({ cls: "diary-frontmatter-icon" });
+				setIcon(iconEl, "tag");
+				triggerEl.createSpan({ cls: "diary-frontmatter-text", text: currentValue });
+			} else if (matchedOption) {
 				const iconEl = triggerEl.createDiv({ cls: "diary-frontmatter-icon" });
 				if (matchedOption.color) {
 					iconEl.style.color = matchedOption.color;
@@ -1180,6 +1232,10 @@ export class DiaryView extends ItemView {
 				triggerEl.createSpan({ cls: "diary-frontmatter-placeholder", text: picker.label || key });
 			}
 		}
+	}
+
+	private getCustomPickerType(picker: CustomFrontmatterPicker): CustomFrontmatterPickerType {
+		return picker.type ?? "options";
 	}
 
 	private renderDatePickerContent(panelEl: HTMLElement): void {
