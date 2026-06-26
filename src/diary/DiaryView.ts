@@ -678,9 +678,7 @@ export class DiaryView extends ItemView {
 				: null;
 			if (pickerType === "text" && currentValue) {
 				triggerEl.addClass("has-value");
-				const iconEl = triggerEl.createDiv({ cls: "diary-frontmatter-icon" });
-				setIcon(iconEl, "tag");
-				triggerEl.createSpan({ cls: "diary-frontmatter-text", text: currentValue });
+				triggerEl.createSpan({ cls: "diary-frontmatter-text", text: `${picker.label || key}: ${currentValue}` });
 			} else if (matchedOption) {
 				triggerEl.addClass("has-value");
 				const iconEl = triggerEl.createDiv({ cls: "diary-frontmatter-icon" });
@@ -1215,9 +1213,7 @@ export class DiaryView extends ItemView {
 			triggerEl.empty();
 			triggerEl.classList.toggle("has-value", pickerType === "text" ? !!currentValue : !!matchedOption);
 			if (pickerType === "text" && currentValue) {
-				const iconEl = triggerEl.createDiv({ cls: "diary-frontmatter-icon" });
-				setIcon(iconEl, "tag");
-				triggerEl.createSpan({ cls: "diary-frontmatter-text", text: currentValue });
+				triggerEl.createSpan({ cls: "diary-frontmatter-text", text: `${picker.label || key}: ${currentValue}` });
 			} else if (matchedOption) {
 				const iconEl = triggerEl.createDiv({ cls: "diary-frontmatter-icon" });
 				if (matchedOption.color) {
