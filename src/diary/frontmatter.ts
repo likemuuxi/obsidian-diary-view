@@ -25,8 +25,8 @@ interface MarkdownHeadingMatch {
 }
 
 export const DEFAULT_DAILY_QUOTE_FRONTMATTER_KEY = "daily-quote";
-export const DEFAULT_DAILY_WEATHER_FRONTMATTER_KEY = "daily-weather";
 export const DEFAULT_DAILY_IMAGE_FRONTMATTER_KEY = "daily-image";
+export const DEFAULT_DAILY_IMAGE_DESC_FRONTMATTER_KEY = "daily-image-desc";
 
 export function readFrontmatterString(frontmatter: unknown, key: string, includeEmpty = false): string | null {
 	if (!frontmatter || typeof frontmatter !== "object") {
@@ -62,10 +62,6 @@ function readFrontmatterValueString(value: unknown, includeEmpty: boolean): stri
 
 export function readDailyQuote(frontmatter: unknown, key: string = DEFAULT_DAILY_QUOTE_FRONTMATTER_KEY): string | null {
 	return readFrontmatterString(frontmatter, key, true);
-}
-
-export function readWeatherIcon(frontmatter: unknown, key: string = DEFAULT_DAILY_WEATHER_FRONTMATTER_KEY): string | null {
-	return readFrontmatterString(frontmatter, key);
 }
 
 export function readArtworkImage(frontmatter: unknown, key: string = DEFAULT_DAILY_IMAGE_FRONTMATTER_KEY): string | null {

@@ -1,18 +1,18 @@
-import { ItemView, MarkdownRenderer, moment, normalizePath, Notice, requestUrl, setIcon, TFile, TFolder, WorkspaceLeaf ,Platform} from "obsidian";
+import { ItemView, MarkdownRenderer, moment as obsidianMoment, normalizePath, Notice, requestUrl, setIcon, TFile, TFolder, WorkspaceLeaf ,Platform} from "obsidian";
 import $ from "jquery";
 import "turn.js";
+import type * as Moment from "moment";
 import type DiaryViewPlugin from "../main";
 import {
 	DEFAULT_DAILY_IMAGE_FRONTMATTER_KEY,
+	DEFAULT_DAILY_IMAGE_DESC_FRONTMATTER_KEY,
 	DEFAULT_DAILY_QUOTE_FRONTMATTER_KEY,
-	DEFAULT_DAILY_WEATHER_FRONTMATTER_KEY,
 	type DiarySection,
 	extractFirstImage,
 	readAllBodyUnderHeadings,
 	readArtworkImage,
 	readDailyQuote,
 	readFrontmatterString,
-	readWeatherIcon,
 	splitFrontmatter,
 	writeAllBodyUnderHeadings,
 } from "./frontmatter";
@@ -26,7 +26,6 @@ import {
 	type WikilinkContext,
 	type WikilinkSuggestion,
 } from "./wikilink";
-import { getAllMoodIcons, type MoodIconItem } from "./mood";
 import { t, tCount, getMonthName, getShortWeekday, type Language } from "../i18n";
 import type { CustomFrontmatterPicker } from "../settings";
 
@@ -34,6 +33,7 @@ const AUTOSAVE_DELAY_MS = 1500;
 const DESKTOP_BREAKPOINT_QUERY = "(min-width: 960px)";
 const SWIPE_MIN_DISTANCE_PX = 90;
 const TURN_NATIVE_CORNER_SIZE_PX = 120;
+const moment = obsidianMoment as unknown as (input?: Moment.MomentInput) => Moment.Moment;
 
 interface DiaryDateItem {
 	id: string;
@@ -60,10 +60,6 @@ interface DiaryPageContent {
 	markdown: string;
 	wordCount: number;
 	exists: boolean;
-	weatherIcon: string;
-	weatherValue: string | null;
-	moodIconName: string | null;
-	moodDescription: string | null;
 	customFrontmatterValues: Record<string, string | null>;
 }
 
@@ -78,8 +74,10 @@ export class DiaryView extends ItemView {
 	private isMarkdownPreview = true;
 	private saveTimers = new Map<string, number>();
 	private promptSaveTimers = new Map<string, number>();
+	private imageCaptionSaveTimers = new Map<string, number>();
 	private drafts = new Map<string, string>();
 	private promptDrafts = new Map<string, string>();
+	private imageCaptionDrafts = new Map<string, string>();
 	private renderVersion = 0;
 	private pendingQuoteRequests = new Map<string, Promise<string | null>>();
 	private renderedContentByPath = new Map<string, DiaryPageContent>();
@@ -87,10 +85,6 @@ export class DiaryView extends ItemView {
 	private datePickerMonth = new Date().getMonth();
 	private datePickerYear = new Date().getFullYear();
 	private datePickerCleanup: (() => void) | null = null;
-	private weatherPickerOpen = false;
-	private weatherPickerCleanup: (() => void) | null = null;
-	private moodPickerOpen = false;
-	private moodPickerCleanup: (() => void) | null = null;
 	private customPickerOpen = false;
 	private customPickerCleanup: (() => void) | null = null;
 	private usingTurnBook = false;
@@ -148,8 +142,7 @@ export class DiaryView extends ItemView {
 
 	async onClose(): Promise<void> {
 		this.closeDatePicker();
-		this.closeWeatherPicker();
-		this.closeMoodPicker();
+		this.closeCustomPicker();
 		this.turnResizeObserver?.disconnect();
 		this.turnResizeObserver = null;
 		if (this.turnResizeFrame !== null) {
@@ -170,7 +163,7 @@ export class DiaryView extends ItemView {
 
 	private async render(): Promise<void> {
 		this.closeDatePicker();
-		this.closeWeatherPicker();
+		this.closeCustomPicker();
 		const renderVersion = ++this.renderVersion;
 		const useTurnBook = this.shouldUsePageFlip();
 		const contentIds = useTurnBook
@@ -607,19 +600,12 @@ export class DiaryView extends ItemView {
 		this.renderPageBindingMarks(pageEl, "right");
 
 		const headerEl = pageEl.createDiv({ cls: "diary-page-header" });
-		const dayInfoEl = headerEl.createDiv({ cls: "diary-day-info diary-weather-trigger" });
-		const sunEl = dayInfoEl.createDiv({ cls: "diary-day-icon" });
-		sunEl.dataset.filePath = content.filePath;
-		setIcon(sunEl, content.weatherIcon);
+		const dayInfoEl = headerEl.createDiv({ cls: "diary-day-info" });
 		const dayTextEl = dayInfoEl.createDiv({ cls: "diary-day-text" });
 		dayTextEl.createSpan({ cls: "diary-day-name", text: dateInfo.fullDay });
 		const dateLocale = this.lang() === "zh" ? "zh-CN" : undefined;
 		const formattedDate = dateInfo.date.toLocaleDateString(dateLocale, { year: "numeric", month: "long", day: "numeric" });
 		dayTextEl.createSpan({ cls: "diary-day-date", text: formattedDate });
-		dayInfoEl.addEventListener("click", (evt) => {
-			this.toggleWeatherPicker(dayInfoEl, content);
-			evt.stopPropagation();
-		});
 
 		const datePickerButtonEl = headerEl.createEl("button", {
 			cls: "diary-header-button",
@@ -656,38 +642,33 @@ export class DiaryView extends ItemView {
 		} else {
 			this.renderDefaultArtwork(artworkEl);
 		}
-		artworkWrapEl.createSpan({ cls: "diary-artwork-caption", text: content.imageCaption });
+		const captionInputEl = artworkWrapEl.createEl("input", {
+			cls: "diary-artwork-caption",
+			attr: {
+				type: "text",
+				placeholder: t("caption.placeholder", this.lang()),
+				value: content.imageCaption,
+			},
+		});
+		captionInputEl.addEventListener("input", () => {
+			const nextCaption = captionInputEl.value;
+			content.imageCaption = nextCaption;
+			this.imageCaptionDrafts.set(content.filePath, nextCaption);
+			if (artworkEl.hasClass("has-custom-image")) {
+				const imgEl = artworkEl.querySelector<HTMLImageElement>(".diary-artwork-image");
+				if (imgEl) {
+					imgEl.alt = nextCaption;
+				}
+			}
+			this.scheduleImageCaptionSave(content.filePath, nextCaption);
+		});
 
 		const moodWrapEl = artworkWrapEl.createDiv({ cls: "diary-mood-wrap" });
 		const moodScrollEl = moodWrapEl.createDiv({ cls: "diary-mood-scroll" });
-		const moodTriggerEl = moodScrollEl.createDiv({ cls: "diary-mood-trigger" });
-		moodTriggerEl.dataset.filePath = content.filePath;
-		if (content.moodIconName) {
-			moodTriggerEl.addClass("has-mood");
-			const moodIconEl = moodTriggerEl.createDiv({ cls: "diary-mood-icon" });
-			const match = this.resolveMoodIcon(content.moodIconName);
-			if (match?.color) {
-				moodIconEl.style.color = match.color;
-			}
-			setIcon(moodIconEl, content.moodIconName);
-			if (content.moodDescription) {
-				const textEl = moodTriggerEl.createSpan({ cls: "diary-mood-text", text: content.moodDescription });
-				if (match?.color) {
-					textEl.style.color = match.color;
-				}
-			}
-		} else {
-			moodTriggerEl.createSpan({ cls: "diary-mood-placeholder", text: t("mood.set-placeholder", this.lang()) });
-		}
-		moodTriggerEl.addEventListener("click", (evt) => {
-			this.toggleMoodPicker(moodTriggerEl, content);
-			evt.stopPropagation();
-		});
-
 		for (const picker of this.plugin.settings.customFrontmatterPickers) {
 			const key = picker.key.trim();
 			if (!key) continue;
-			const triggerEl = moodScrollEl.createDiv({ cls: "diary-mood-trigger diary-custom-trigger" });
+			const triggerEl = moodScrollEl.createDiv({ cls: "diary-frontmatter-trigger" });
 			triggerEl.dataset.filePath = content.filePath;
 			triggerEl.dataset.pickerKey = key;
 			const currentValue = content.customFrontmatterValues[key] ?? null;
@@ -695,19 +676,19 @@ export class DiaryView extends ItemView {
 				? picker.options.find((opt) => opt.name === currentValue || opt.icon === currentValue)
 				: null;
 			if (matchedOption) {
-				triggerEl.addClass("has-mood");
-				const iconEl = triggerEl.createDiv({ cls: "diary-mood-icon" });
+				triggerEl.addClass("has-value");
+				const iconEl = triggerEl.createDiv({ cls: "diary-frontmatter-icon" });
 				if (matchedOption.color) {
 					iconEl.style.color = matchedOption.color;
 				}
 				setIcon(iconEl, matchedOption.icon || "tag");
 				const label = picker.label || key;
-				const textEl = triggerEl.createSpan({ cls: "diary-mood-text", text: matchedOption.name || label });
+				const textEl = triggerEl.createSpan({ cls: "diary-frontmatter-text", text: matchedOption.name || label });
 				if (matchedOption.color) {
 					textEl.style.color = matchedOption.color;
 				}
 			} else {
-				triggerEl.createSpan({ cls: "diary-mood-placeholder", text: picker.label || key });
+				triggerEl.createSpan({ cls: "diary-frontmatter-placeholder", text: picker.label || key });
 			}
 			triggerEl.addEventListener("click", (evt) => {
 				this.toggleCustomPicker(triggerEl, content, picker);
@@ -752,7 +733,6 @@ export class DiaryView extends ItemView {
 		const headphoneEl = promptLabelEl.createDiv({ cls: "diary-prompt-label-icon" });
 		setIcon(headphoneEl, "quote");
 		promptLabelEl.createSpan({ text: content.promptTitle });
-		promptMetaEl.createSpan({ cls: "diary-prompt-time", text: content.time });
 
 		const promptEditorWrapEl = promptCardEl.createDiv({ cls: "diary-prompt-editor-wrap" });
 		const promptTextEl = promptEditorWrapEl.createEl("textarea", {
@@ -923,6 +903,11 @@ export class DiaryView extends ItemView {
 		textareaEl.addEventListener("blur", () => {
 			void this.flushPendingNoteSave(content.filePath);
 		});
+		this.bindClipboardImagePaste(textareaEl, content.filePath, (value) => {
+			this.drafts.set(content.filePath, value);
+			this.scheduleDailyNoteSave(content.filePath, value);
+			this.updateFooterWordCount(footerCountEl, value);
+		});
 		this.bindTextareaWikilinkSuggest(textareaEl, wikilinkSuggestEl, content.filePath, (value) => {
 			this.drafts.set(content.filePath, value);
 			this.scheduleDailyNoteSave(content.filePath, value);
@@ -1025,191 +1010,6 @@ export class DiaryView extends ItemView {
 			this.datePickerCleanup = null;
 		}
 		this.datePickerOpen = false;
-	}
-
-	private toggleWeatherPicker(anchorEl: HTMLElement, content: DiaryPageContent): void {
-		if (this.weatherPickerOpen) {
-			this.closeWeatherPicker();
-			return;
-		}
-
-		this.weatherPickerOpen = true;
-
-		const panelEl = activeDocument.body.createDiv({ cls: "diary-weather-picker" });
-		this.renderWeatherPickerContent(panelEl, content);
-
-		const anchorRect = anchorEl.getBoundingClientRect();
-		const panelHeight = panelEl.offsetHeight || 300;
-		const panelWidth = panelEl.offsetWidth || 260;
-		let top = anchorRect.bottom + 8;
-		let left = anchorRect.left + anchorRect.width / 2 - panelWidth / 2;
-		if (top + panelHeight > window.innerHeight) {
-			top = anchorRect.top - panelHeight - 8;
-		}
-		if (left < 8) left = 8;
-		if (left + panelWidth > window.innerWidth - 8) left = window.innerWidth - panelWidth - 8;
-		panelEl.style.top = `${top}px`;
-		panelEl.style.left = `${left}px`;
-
-		const onClickOutside = (evt: MouseEvent): void => {
-			if (!panelEl.contains(evt.target as Node) && evt.target !== anchorEl) {
-				this.closeWeatherPicker();
-			}
-		};
-
-		const onKeyDown = (evt: KeyboardEvent): void => {
-			if (evt.key === "Escape") {
-				this.closeWeatherPicker();
-			}
-		};
-
-		activeDocument.addEventListener("click", onClickOutside, true);
-		activeDocument.addEventListener("keydown", onKeyDown);
-		this.weatherPickerCleanup = () => {
-			activeDocument.removeEventListener("click", onClickOutside, true);
-			activeDocument.removeEventListener("keydown", onKeyDown);
-			panelEl.remove();
-		};
-	}
-
-	private closeWeatherPicker(): void {
-		if (this.weatherPickerCleanup) {
-			this.weatherPickerCleanup();
-			this.weatherPickerCleanup = null;
-		}
-		this.weatherPickerOpen = false;
-	}
-
-	private renderWeatherPickerContent(panelEl: HTMLElement, content: DiaryPageContent): void {
-		const weatherOptions = this.getWeatherOptions();
-		const currentIcon = content.weatherIcon;
-
-		panelEl.createDiv({ cls: "diary-weather-picker-title", text: t("weather.picker-title", this.lang()) });
-
-		const gridEl = panelEl.createDiv({ cls: "diary-weather-picker-grid" });
-		for (const option of weatherOptions) {
-			const isActive = currentIcon === option.icon;
-			const itemEl = gridEl.createEl("button", {
-				cls: `diary-weather-picker-item${isActive ? " is-active" : ""}`,
-				attr: {
-					type: "button",
-					"aria-label": option.label,
-					title: option.label,
-				},
-			});
-			const iconEl = itemEl.createDiv({ cls: "diary-weather-picker-icon" });
-			setIcon(iconEl, option.icon);
-			itemEl.createSpan({ cls: "diary-weather-picker-label", text: option.label });
-			itemEl.addEventListener("click", (evt) => {
-				evt.stopPropagation();
-				this.closeWeatherPicker();
-				void this.applyWeatherChange(content.filePath, option.value);
-			});
-		}
-	}
-
-	private async applyWeatherChange(filePath: string, value: string): Promise<void> {
-		let file = this.app.vault.getAbstractFileByPath(filePath);
-		if (!(file instanceof TFile)) {
-			await this.ensureParentFolder(filePath);
-			this.plugin.suppressVaultRefresh(filePath, 1500);
-			file = await this.app.vault.create(filePath, "");
-		}
-
-		if (!(file instanceof TFile)) {
-			return;
-		}
-
-		try {
-			this.plugin.suppressVaultRefresh(filePath, 1500);
-			await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
-				frontmatter[this.getDailyWeatherFrontmatterKey()] = value;
-			});
-		} catch (error) {
-			console.warn("Failed to save weather in frontmatter", error);
-		}
-
-		const resolvedIcon = this.resolveWeatherIcon(value);
-		const cached = this.renderedContentByPath.get(filePath);
-		if (cached) {
-			cached.weatherValue = value;
-			cached.weatherIcon = resolvedIcon;
-		}
-
-		this.markFileCreated(filePath);
-		this.updateWeatherIcons(filePath, resolvedIcon);
-	}
-
-	private updateWeatherIcons(filePath: string, iconName: string): void {
-		const iconEls = Array.from(this.contentEl.querySelectorAll<HTMLElement>(`.diary-day-icon[data-file-path="${CSS.escape(filePath)}"]`));
-		for (const iconEl of iconEls) {
-			setIcon(iconEl, iconName);
-		}
-	}
-
-	private resolveMoodIcon(value: string): MoodIconItem | null {
-		const lang = this.lang();
-		const allIcons = getAllMoodIcons(this.plugin.settings.customMoodIcons, lang);
-		const allIconsEn = getAllMoodIcons(this.plugin.settings.customMoodIcons, "en");
-		
-		return allIcons.find((item) => {
-			if (item.name === value || item.description === value || item.descriptionZh === value) return true;
-			const enMatch = allIconsEn.find(i => i.name === item.name);
-			return !!(enMatch && enMatch.description === value);
-		}) ?? null;
-	}
-
-	private toggleMoodPicker(anchorEl: HTMLElement, content: DiaryPageContent): void {
-		if (this.moodPickerOpen) {
-			this.closeMoodPicker();
-			return;
-		}
-
-		this.moodPickerOpen = true;
-
-		const panelEl = activeDocument.body.createDiv({ cls: "diary-mood-picker" });
-		this.renderMoodPickerContent(panelEl, content);
-
-		const anchorRect = anchorEl.getBoundingClientRect();
-		const panelHeight = panelEl.offsetHeight || 300;
-		const panelWidth = panelEl.offsetWidth || 260;
-		let top = anchorRect.bottom + 8;
-		let left = anchorRect.left + anchorRect.width / 2 - panelWidth / 2;
-		if (top + panelHeight > window.innerHeight) {
-			top = anchorRect.top - panelHeight - 8;
-		}
-		if (left < 8) left = 8;
-		if (left + panelWidth > window.innerWidth - 8) left = window.innerWidth - panelWidth - 8;
-		panelEl.style.top = `${top}px`;
-		panelEl.style.left = `${left}px`;
-
-		const onClickOutside = (evt: MouseEvent): void => {
-			if (!panelEl.contains(evt.target as Node) && evt.target !== anchorEl) {
-				this.closeMoodPicker();
-			}
-		};
-
-		const onKeyDown = (evt: KeyboardEvent): void => {
-			if (evt.key === "Escape") {
-				this.closeMoodPicker();
-			}
-		};
-
-		activeDocument.addEventListener("click", onClickOutside, true);
-		activeDocument.addEventListener("keydown", onKeyDown);
-		this.moodPickerCleanup = () => {
-			activeDocument.removeEventListener("click", onClickOutside, true);
-			activeDocument.removeEventListener("keydown", onKeyDown);
-			panelEl.remove();
-		};
-	}
-
-	private closeMoodPicker(): void {
-		if (this.moodPickerCleanup) {
-			this.moodPickerCleanup();
-			this.moodPickerCleanup = null;
-		}
-		this.moodPickerOpen = false;
 	}
 
 	private toggleCustomPicker(anchorEl: HTMLElement, content: DiaryPageContent, picker: CustomFrontmatterPicker): void {
@@ -1354,7 +1154,7 @@ export class DiaryView extends ItemView {
 	private updateCustomPickerDisplay(filePath: string): void {
 		const pickers = this.plugin.settings.customFrontmatterPickers;
 		const cached = this.renderedContentByPath.get(filePath);
-		const triggers = Array.from(this.contentEl.querySelectorAll<HTMLElement>(`.diary-custom-trigger[data-file-path="${CSS.escape(filePath)}"]`));
+		const triggers = Array.from(this.contentEl.querySelectorAll<HTMLElement>(`.diary-frontmatter-trigger[data-file-path="${CSS.escape(filePath)}"]`));
 		for (const triggerEl of triggers) {
 			const key = triggerEl.dataset.pickerKey;
 			if (!key) continue;
@@ -1365,185 +1165,21 @@ export class DiaryView extends ItemView {
 				? picker.options.find((opt) => opt.name === currentValue || opt.icon === currentValue)
 				: null;
 			triggerEl.empty();
-			triggerEl.classList.toggle("has-mood", !!matchedOption);
+			triggerEl.classList.toggle("has-value", !!matchedOption);
 			if (matchedOption) {
-				const iconEl = triggerEl.createDiv({ cls: "diary-mood-icon" });
+				const iconEl = triggerEl.createDiv({ cls: "diary-frontmatter-icon" });
 				if (matchedOption.color) {
 					iconEl.style.color = matchedOption.color;
 				}
 				setIcon(iconEl, matchedOption.icon || "tag");
-				const textEl = triggerEl.createSpan({ cls: "diary-mood-text", text: matchedOption.name || picker.label || key });
+				const textEl = triggerEl.createSpan({ cls: "diary-frontmatter-text", text: matchedOption.name || picker.label || key });
 				if (matchedOption.color) {
 					textEl.style.color = matchedOption.color;
 				}
 			} else {
-				triggerEl.createSpan({ cls: "diary-mood-placeholder", text: picker.label || key });
+				triggerEl.createSpan({ cls: "diary-frontmatter-placeholder", text: picker.label || key });
 			}
 		}
-	}
-
-	private renderMoodPickerContent(panelEl: HTMLElement, content: DiaryPageContent): void {
-		const lang = this.lang();
-		const allIcons = getAllMoodIcons(this.plugin.settings.customMoodIcons, lang);
-		const currentIcon = content.moodIconName;
-
-		const headerEl = panelEl.createDiv({ cls: "diary-mood-picker-header" });
-		headerEl.createDiv({ cls: "diary-mood-picker-title", text: t("mood.picker-title", lang) });
-		if (currentIcon) {
-			const clearBtn = headerEl.createEl("button", {
-				cls: "diary-mood-picker-clear",
-				attr: {
-					type: "button",
-					"aria-label": t("mood.clear", lang),
-					title: t("mood.clear", lang),
-				},
-			});
-			setIcon(clearBtn, "x");
-			clearBtn.addEventListener("click", (evt) => {
-				evt.stopPropagation();
-				this.closeMoodPicker();
-				void this.applyMoodChange(content.filePath, null);
-			});
-		}
-
-		const gridEl = panelEl.createDiv({ cls: "diary-mood-picker-grid" });
-		for (const icon of allIcons) {
-			const isActive = currentIcon === icon.name;
-			const itemEl = gridEl.createEl("button", {
-				cls: `diary-mood-picker-item${isActive ? " is-active" : ""}`,
-				attr: {
-					type: "button",
-					"aria-label": icon.description || icon.name,
-					title: icon.description || icon.name,
-				},
-			});
-			const iconEl = itemEl.createDiv({ cls: "diary-mood-picker-icon" });
-			if (icon.color) {
-				iconEl.style.color = icon.color;
-			}
-			setIcon(iconEl, icon.name);
-			const labelEl = itemEl.createSpan({ cls: "diary-mood-picker-label", text: icon.description || icon.name });
-			if (icon.color) {
-				labelEl.style.color = icon.color;
-			}
-			itemEl.addEventListener("click", (evt) => {
-				evt.stopPropagation();
-				this.closeMoodPicker();
-				void this.applyMoodChange(content.filePath, icon.name);
-			});
-		}
-	}
-
-	private async applyMoodChange(filePath: string, iconName: string | null): Promise<void> {
-		let file = this.app.vault.getAbstractFileByPath(filePath);
-		if (!(file instanceof TFile)) {
-			await this.ensureParentFolder(filePath);
-			this.plugin.suppressVaultRefresh(filePath, 1500);
-			file = await this.app.vault.create(filePath, "");
-		}
-
-		if (!(file instanceof TFile)) {
-			return;
-		}
-
-		const moodKey = this.plugin.settings.moodFrontmatterKey?.trim() || "daily-mood";
-		const match = iconName ? this.resolveMoodIcon(iconName) : null;
-
-		try {
-			this.plugin.suppressVaultRefresh(filePath, 1500);
-			await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
-				if (iconName === null) {
-					delete frontmatter[moodKey];
-				} else {
-					frontmatter[moodKey] = match ? (match.description || match.name) : iconName;
-				}
-			});
-		} catch (error) {
-			console.warn("Failed to save mood in frontmatter", error);
-		}
-
-		const cached = this.renderedContentByPath.get(filePath);
-		if (cached) {
-			cached.moodIconName = iconName;
-			const match = iconName ? this.resolveMoodIcon(iconName) : null;
-			cached.moodDescription = match?.description ?? null;
-		}
-
-		this.markFileCreated(filePath);
-		this.updateMoodDisplay(filePath, iconName, cached?.moodDescription ?? null);
-	}
-
-	private updateMoodDisplay(filePath: string, iconName: string | null, description: string | null): void {
-		const lang = this.lang();
-		const moodTriggers = Array.from(this.contentEl.querySelectorAll<HTMLElement>(`.diary-mood-trigger[data-file-path="${CSS.escape(filePath)}"]:not(.diary-custom-trigger)`));
-		const match = iconName ? this.resolveMoodIcon(iconName) : null;
-		for (const triggerEl of moodTriggers) {
-			triggerEl.empty();
-			triggerEl.classList.toggle("has-mood", !!iconName);
-			if (iconName) {
-				const moodIconEl = triggerEl.createDiv({ cls: "diary-mood-icon" });
-				if (match?.color) {
-					moodIconEl.style.color = match.color;
-				}
-				setIcon(moodIconEl, iconName);
-				if (description) {
-					const textEl = triggerEl.createSpan({ cls: "diary-mood-text", text: description });
-					if (match?.color) {
-						textEl.style.color = match.color;
-					}
-				}
-			} else {
-				triggerEl.createSpan({ cls: "diary-mood-placeholder", text: t("mood.set-placeholder", lang) });
-			}
-		}
-	}
-
-	private static readonly WEATHER_OPTIONS: Array<{
-		icon: string;
-		labelEn: string;
-		labelZh: string;
-	}> = [
-		{ icon: "sun", labelEn: "Sun", labelZh: "晴" },
-		{ icon: "sun-dim", labelEn: "Sun dim", labelZh: "晴间多云" },
-		{ icon: "sun-medium", labelEn: "Sun medium", labelZh: "温和" },
-		{ icon: "sunrise", labelEn: "Sunrise", labelZh: "日出" },
-		{ icon: "sunset", labelEn: "Sunset", labelZh: "日落" },
-		{ icon: "cloud-sun", labelEn: "Partly cloudy", labelZh: "多云" },
-		{ icon: "cloud-sun-rain", labelEn: "Sun shower", labelZh: "太阳雨" },
-		{ icon: "sun-snow", labelEn: "Sun snow", labelZh: "太阳雪" },
-		{ icon: "cloud", labelEn: "Cloud", labelZh: "阴" },
-		{ icon: "cloud-off", labelEn: "Cloud off", labelZh: "少云" },
-		{ icon: "cloudy", labelEn: "Cloudy", labelZh: "阴天" },
-		{ icon: "cloud-fog", labelEn: "Fog", labelZh: "雾" },
-		{ icon: "haze", labelEn: "Haze", labelZh: "霾" },
-		{ icon: "cloud-drizzle", labelEn: "Drizzle", labelZh: "小雨" },
-		{ icon: "cloud-rain", labelEn: "Rain", labelZh: "雨" },
-		{ icon: "cloud-rain-wind", labelEn: "Heavy rain", labelZh: "大雨" },
-		{ icon: "cloud-hail", labelEn: "Hail", labelZh: "冰雹" },
-		{ icon: "cloud-lightning", labelEn: "Thunder", labelZh: "雷" },
-		{ icon: "cloud-snow", labelEn: "Snow", labelZh: "雪" },
-		{ icon: "snowflake", labelEn: "Snowflake", labelZh: "雪花" },
-		{ icon: "cloud-moon", labelEn: "Night cloudy", labelZh: "夜间多云" },
-		{ icon: "cloud-moon-rain", labelEn: "Night rain", labelZh: "夜间雨" },
-		{ icon: "moon-star", labelEn: "Night clear", labelZh: "夜间晴" },
-		{ icon: "wind", labelEn: "Wind", labelZh: "风" },
-		{ icon: "tornado", labelEn: "Tornado", labelZh: "龙卷风" },
-		{ icon: "thermometer", labelEn: "Thermometer", labelZh: "温度计" },
-		{ icon: "thermometer-sun", labelEn: "Hot", labelZh: "高温" },
-		{ icon: "thermometer-snowflake", labelEn: "Cold", labelZh: "低温" },
-		{ icon: "umbrella", labelEn: "Umbrella", labelZh: "伞" },
-		{ icon: "rainbow", labelEn: "Rainbow", labelZh: "彩虹" },
-		{ icon: "droplets", labelEn: "Droplets", labelZh: "水滴" },
-		{ icon: "waves", labelEn: "Waves", labelZh: "浪" },
-	];
-
-	private getWeatherOptions(): Array<{ value: string; icon: string; label: string }> {
-		const isZh = this.lang() === "zh";
-		return DiaryView.WEATHER_OPTIONS.map((opt) => ({
-			value: isZh ? opt.labelZh : opt.icon,
-			icon: opt.icon,
-			label: isZh ? opt.labelZh : opt.labelEn,
-		}));
 	}
 
 	private renderDatePickerContent(panelEl: HTMLElement): void {
@@ -1793,8 +1429,8 @@ export class DiaryView extends ItemView {
 		return this.plugin.settings.dailyQuoteFrontmatterKey?.trim() || DEFAULT_DAILY_QUOTE_FRONTMATTER_KEY;
 	}
 
-	private getDailyWeatherFrontmatterKey(): string {
-		return this.plugin.settings.dailyWeatherFrontmatterKey?.trim() || DEFAULT_DAILY_WEATHER_FRONTMATTER_KEY;
+	private getDailyImageDescFrontmatterKey(): string {
+		return this.plugin.settings.dailyImageDescFrontmatterKey?.trim() || DEFAULT_DAILY_IMAGE_DESC_FRONTMATTER_KEY;
 	}
 
 	private async openDailyNote(path: string): Promise<void> {
@@ -1839,17 +1475,13 @@ export class DiaryView extends ItemView {
 		const wordCount = this.countWords(markdown);
 		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
 		const quoteFrontmatterKey = this.getDailyQuoteFrontmatterKey();
-		const weatherFrontmatterKey = this.getDailyWeatherFrontmatterKey();
 		const dailyQuote = readDailyQuote(frontmatter, quoteFrontmatterKey) ?? await this.fetchAndCacheDailyQuote(file);
 		const imageFrontmatterKey = this.plugin.settings.dailyImageFrontmatterKey || DEFAULT_DAILY_IMAGE_FRONTMATTER_KEY;
 		let artworkImage = readArtworkImage(frontmatter, imageFrontmatterKey);
 		if (!artworkImage && this.plugin.settings.useFirstImageAsArtwork) {
 			artworkImage = extractFirstImage(body);
 		}
-		const rawWeather = readWeatherIcon(frontmatter, weatherFrontmatterKey);
-		const moodFrontmatterKey = this.plugin.settings.moodFrontmatterKey?.trim() || "daily-mood";
-		const rawMood = readFrontmatterString(frontmatter, moodFrontmatterKey);
-		const moodMatch = rawMood ? this.resolveMoodIcon(rawMood) : null;
+		const imageCaption = readFrontmatterString(frontmatter, this.getDailyImageDescFrontmatterKey(), true) ?? "";
 		const customFrontmatterValues: Record<string, string | null> = {};
 		for (const picker of this.plugin.settings.customFrontmatterPickers) {
 			const key = picker.key.trim();
@@ -1859,7 +1491,7 @@ export class DiaryView extends ItemView {
 		}
 
 		return {
-			imageCaption: file.basename,
+			imageCaption,
 			artworkImage,
 			promptTitle: t("quote.title", lang),
 			promptText: dailyQuote ?? "",
@@ -1870,10 +1502,6 @@ export class DiaryView extends ItemView {
 			markdown,
 			wordCount,
 			exists: true,
-			weatherIcon: this.resolveWeatherIcon(rawWeather),
-			weatherValue: rawWeather,
-			moodIconName: moodMatch?.name ?? rawMood,
-			moodDescription: moodMatch?.description ?? null,
 			customFrontmatterValues,
 		};
 	}
@@ -1893,7 +1521,7 @@ export class DiaryView extends ItemView {
 			: [];
 		const markdown = sections.map((s) => s.heading).join("\n\n");
 		return {
-			imageCaption: t("content.no-note-caption", lang),
+			imageCaption: "",
 			artworkImage: null,
 			promptTitle: t("quote.title", lang),
 			promptText: "",
@@ -1904,10 +1532,6 @@ export class DiaryView extends ItemView {
 			markdown,
 			wordCount: 0,
 			exists: false,
-			weatherIcon: "sun",
-			weatherValue: null,
-			moodIconName: null,
-			moodDescription: null,
 			customFrontmatterValues: {},
 		};
 	}
@@ -2016,47 +1640,6 @@ export class DiaryView extends ItemView {
 	private cleanQuoteText(value: string): string | null {
 		const quote = value.replace(/\s+/g, " ").trim();
 		return quote || null;
-	}
-
-	private static readonly ZH_TO_ICON: Record<string, string> = (() => {
-		const map: Record<string, string> = {};
-		for (const opt of DiaryView.WEATHER_OPTIONS) {
-			map[opt.labelZh] = opt.icon;
-		}
-		return map;
-	})();
-
-	private static readonly LEGACY_ALIAS_TO_ICON: Record<string, string> = {
-		clear: "sun",
-		sunny: "sun",
-		overcast: "cloud",
-		foggy: "cloud-fog",
-		rainy: "cloud-rain",
-		storm: "cloud-lightning",
-		thunder: "cloud-lightning",
-		snowy: "cloud-snow",
-		windy: "wind",
-	};
-
-	private resolveWeatherIcon(value: string | null): string {
-		if (!value) {
-			return "sun";
-		}
-
-		const trimmed = value.trim();
-		const lower = trimmed.toLowerCase();
-
-		const zhMatch = DiaryView.ZH_TO_ICON[trimmed];
-		if (zhMatch) {
-			return zhMatch;
-		}
-
-		const legacyMatch = DiaryView.LEGACY_ALIAS_TO_ICON[lower];
-		if (legacyMatch) {
-			return legacyMatch;
-		}
-
-		return trimmed;
 	}
 
 	private buildDateItems(centerDate = new Date()): DiaryDateItem[] {
@@ -2233,6 +1816,19 @@ export class DiaryView extends ItemView {
 		this.promptSaveTimers.set(path, timerId);
 	}
 
+	private scheduleImageCaptionSave(path: string, imageCaption: string): void {
+		const existingTimer = this.imageCaptionSaveTimers.get(path);
+		if (existingTimer !== undefined) {
+			window.clearTimeout(existingTimer);
+		}
+
+		const timerId = window.setTimeout(() => {
+			this.imageCaptionSaveTimers.delete(path);
+			void this.saveImageCaption(path, imageCaption);
+		}, AUTOSAVE_DELAY_MS);
+		this.imageCaptionSaveTimers.set(path, timerId);
+	}
+
 	private async saveDailyPrompt(path: string, promptText: string): Promise<void> {
 		let file = this.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) {
@@ -2254,6 +1850,39 @@ export class DiaryView extends ItemView {
 			this.promptDrafts.set(path, normalizedPromptText);
 		} catch (error) {
 			console.warn("Failed to save daily prompt in frontmatter", error);
+		}
+	}
+
+	private async saveImageCaption(path: string, imageCaption: string): Promise<void> {
+		let file = this.app.vault.getAbstractFileByPath(path);
+		if (!(file instanceof TFile)) {
+			await this.ensureParentFolder(path);
+			this.plugin.suppressVaultRefresh(path, 1000);
+			file = await this.app.vault.create(path, "");
+		}
+
+		if (!(file instanceof TFile)) {
+			return;
+		}
+
+		const normalizedCaption = imageCaption.trim();
+		try {
+			this.plugin.suppressVaultRefresh(path, 1000);
+			await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
+				const key = this.getDailyImageDescFrontmatterKey();
+				if (normalizedCaption) {
+					frontmatter[key] = normalizedCaption;
+				} else {
+					delete frontmatter[key];
+				}
+			});
+			this.imageCaptionDrafts.set(path, imageCaption);
+			const cached = this.renderedContentByPath.get(path);
+			if (cached) {
+				cached.imageCaption = imageCaption;
+			}
+		} catch (error) {
+			console.warn("Failed to save image caption in frontmatter", error);
 		}
 	}
 
@@ -2358,9 +1987,11 @@ export class DiaryView extends ItemView {
 	private async flushPendingSaves(): Promise<void> {
 		const notePaths = Array.from(this.saveTimers.keys());
 		const promptPaths = Array.from(this.promptSaveTimers.keys());
+		const imageCaptionPaths = Array.from(this.imageCaptionSaveTimers.keys());
 		await Promise.all([
 			...notePaths.map((path) => this.flushPendingNoteSave(path)),
 			...promptPaths.map((path) => this.flushPendingPromptSave(path)),
+			...imageCaptionPaths.map((path) => this.flushPendingImageCaptionSave(path)),
 		]);
 	}
 
@@ -2390,6 +2021,19 @@ export class DiaryView extends ItemView {
 		}
 	}
 
+	private async flushPendingImageCaptionSave(path: string): Promise<void> {
+		const timerId = this.imageCaptionSaveTimers.get(path);
+		if (timerId !== undefined) {
+			window.clearTimeout(timerId);
+			this.imageCaptionSaveTimers.delete(path);
+		}
+
+		const draft = this.imageCaptionDrafts.get(path);
+		if (draft !== undefined) {
+			await this.saveImageCaption(path, draft);
+		}
+	}
+
 	private async ensureParentFolder(path: string): Promise<void> {
 		const parts = path.split("/");
 		parts.pop();
@@ -2401,6 +2045,93 @@ export class DiaryView extends ItemView {
 			}
 			await this.app.vault.createFolder(currentPath).catch(() => undefined);
 		}
+	}
+
+	private bindClipboardImagePaste(
+		textareaEl: HTMLTextAreaElement,
+		sourcePath: string,
+		onChange: (value: string) => void,
+	): void {
+		textareaEl.addEventListener("paste", (event) => {
+			const imageFiles = this.getClipboardImageFiles(event);
+			if (imageFiles.length === 0) {
+				return;
+			}
+
+			event.preventDefault();
+			void this.insertClipboardImages(textareaEl, sourcePath, imageFiles, onChange);
+		});
+	}
+
+	private getClipboardImageFiles(event: ClipboardEvent): File[] {
+		const clipboardData = event.clipboardData;
+		if (!clipboardData) {
+			return [];
+		}
+
+		return Array.from(clipboardData.files).filter((file) => file.type.startsWith("image/"));
+	}
+
+	private async insertClipboardImages(
+		textareaEl: HTMLTextAreaElement,
+		sourcePath: string,
+		imageFiles: File[],
+		onChange: (value: string) => void,
+	): Promise<void> {
+		try {
+			const links: string[] = [];
+			for (const imageFile of imageFiles) {
+				const attachmentFile = await this.saveClipboardImageAttachment(imageFile, sourcePath);
+				links.push(`!${this.app.fileManager.generateMarkdownLink(attachmentFile, sourcePath)}`);
+			}
+
+			this.insertTextAtTextareaSelection(textareaEl, links.join("\n"));
+			onChange(textareaEl.value);
+		} catch (error) {
+			console.warn("Failed to paste clipboard image", error);
+			new Notice("Failed to paste image.");
+		}
+	}
+
+	private async saveClipboardImageAttachment(imageFile: File, sourcePath: string): Promise<TFile> {
+		const filename = this.createClipboardImageFilename(imageFile);
+		const attachmentPath = await this.app.fileManager.getAvailablePathForAttachment(filename, sourcePath);
+		this.plugin.suppressVaultRefresh(attachmentPath, 1000);
+		return this.app.vault.createBinary(attachmentPath, await imageFile.arrayBuffer());
+	}
+
+	private createClipboardImageFilename(imageFile: File): string {
+		const extension = this.getImageFileExtension(imageFile);
+		const rawName = imageFile.name && imageFile.name !== "image.png"
+			? imageFile.name
+			: `Pasted image ${moment(new Date()).format("YYYYMMDDHHmmss")}.${extension}`;
+		return rawName.replace(/[\\/:*?"<>|]/g, "-");
+	}
+
+	private getImageFileExtension(imageFile: File): string {
+		const extensionFromName = imageFile.name.split(".").pop();
+		if (extensionFromName && extensionFromName !== imageFile.name) {
+			return extensionFromName.toLowerCase();
+		}
+
+		const extensionFromType = imageFile.type.replace(/^image\//, "").toLowerCase();
+		return extensionFromType === "jpeg" ? "jpg" : extensionFromType || "png";
+	}
+
+	private insertTextAtTextareaSelection(textareaEl: HTMLTextAreaElement, text: string): void {
+		const selectionStart = textareaEl.selectionStart ?? textareaEl.value.length;
+		const selectionEnd = textareaEl.selectionEnd ?? selectionStart;
+		const before = textareaEl.value.slice(0, selectionStart);
+		const after = textareaEl.value.slice(selectionEnd);
+		const prefix = before && !before.endsWith("\n") ? "\n" : "";
+		const suffix = after && !after.startsWith("\n") ? "\n" : "";
+		const insertedText = `${prefix}${text}${suffix}`;
+		const nextCursor = before.length + insertedText.length;
+
+		textareaEl.value = `${before}${insertedText}${after}`;
+		textareaEl.focus();
+		textareaEl.setSelectionRange(nextCursor, nextCursor);
+		textareaEl.dispatchEvent(new Event("input", { bubbles: true }));
 	}
 
 	private updateFooterWordCount(parentEl: HTMLElement, markdown: string): void {
