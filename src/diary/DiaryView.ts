@@ -1,4 +1,4 @@
-import { ItemView, MarkdownRenderer, moment, normalizePath, Notice, requestUrl, setIcon, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { ItemView, MarkdownRenderer, moment, normalizePath, Notice, requestUrl, setIcon, TFile, TFolder, WorkspaceLeaf ,Platform} from "obsidian";
 import $ from "jquery";
 import "turn.js";
 import type DiaryViewPlugin from "../main";
@@ -28,6 +28,7 @@ import {
 } from "./wikilink";
 import { getAllMoodIcons, type MoodIconItem } from "./mood";
 import { t, tCount, getMonthName, getShortWeekday, type Language } from "../i18n";
+import type { CustomFrontmatterPicker } from "../settings";
 
 const AUTOSAVE_DELAY_MS = 1500;
 const DESKTOP_BREAKPOINT_QUERY = "(min-width: 960px)";
@@ -63,6 +64,7 @@ interface DiaryPageContent {
 	weatherValue: string | null;
 	moodIconName: string | null;
 	moodDescription: string | null;
+	customFrontmatterValues: Record<string, string | null>;
 }
 
 type TurnBook = {
@@ -89,6 +91,8 @@ export class DiaryView extends ItemView {
 	private weatherPickerCleanup: (() => void) | null = null;
 	private moodPickerOpen = false;
 	private moodPickerCleanup: (() => void) | null = null;
+	private customPickerOpen = false;
+	private customPickerCleanup: (() => void) | null = null;
 	private usingTurnBook = false;
 	private turnBookEl: HTMLElement | null = null;
 	private turnViewportEl: HTMLElement | null = null;
@@ -637,7 +641,7 @@ export class DiaryView extends ItemView {
 		const artworkImageSource = this.resolveArtworkImageSource(content.artworkImage, content.filePath);
 		if (artworkImageSource) {
 			artworkEl.addClass("has-custom-image");
-			artworkEl.createEl("img", {
+			const imgEl = artworkEl.createEl("img", {
 				cls: "diary-artwork-image",
 				attr: {
 					src: artworkImageSource,
@@ -646,20 +650,17 @@ export class DiaryView extends ItemView {
 					referrerpolicy: "no-referrer",
 				},
 			});
+			imgEl.addEventListener("error", () => {
+				this.renderDefaultArtwork(artworkEl);
+			});
 		} else {
-			const skyEl = artworkEl.createDiv({ cls: "diary-artwork-sky" });
-			this.renderCloud(skyEl, "is-main");
-			this.renderCloud(skyEl, "is-small");
-			const seaEl = artworkEl.createDiv({ cls: "diary-artwork-sea" });
-			const boatEl = seaEl.createDiv({ cls: "diary-artwork-boat" });
-			boatEl.createDiv({ cls: "diary-artwork-boat-person" });
-			boatEl.createDiv({ cls: "diary-artwork-boat-base" });
-			artworkEl.createDiv({ cls: "diary-artwork-sand" });
+			this.renderDefaultArtwork(artworkEl);
 		}
 		artworkWrapEl.createSpan({ cls: "diary-artwork-caption", text: content.imageCaption });
 
 		const moodWrapEl = artworkWrapEl.createDiv({ cls: "diary-mood-wrap" });
-		const moodTriggerEl = moodWrapEl.createDiv({ cls: "diary-mood-trigger" });
+		const moodScrollEl = moodWrapEl.createDiv({ cls: "diary-mood-scroll" });
+		const moodTriggerEl = moodScrollEl.createDiv({ cls: "diary-mood-trigger" });
 		moodTriggerEl.dataset.filePath = content.filePath;
 		if (content.moodIconName) {
 			moodTriggerEl.addClass("has-mood");
@@ -682,6 +683,37 @@ export class DiaryView extends ItemView {
 			this.toggleMoodPicker(moodTriggerEl, content);
 			evt.stopPropagation();
 		});
+
+		for (const picker of this.plugin.settings.customFrontmatterPickers) {
+			const key = picker.key.trim();
+			if (!key) continue;
+			const triggerEl = moodScrollEl.createDiv({ cls: "diary-mood-trigger diary-custom-trigger" });
+			triggerEl.dataset.filePath = content.filePath;
+			triggerEl.dataset.pickerKey = key;
+			const currentValue = content.customFrontmatterValues[key] ?? null;
+			const matchedOption = currentValue
+				? picker.options.find((opt) => opt.name === currentValue || opt.icon === currentValue)
+				: null;
+			if (matchedOption) {
+				triggerEl.addClass("has-mood");
+				const iconEl = triggerEl.createDiv({ cls: "diary-mood-icon" });
+				if (matchedOption.color) {
+					iconEl.style.color = matchedOption.color;
+				}
+				setIcon(iconEl, matchedOption.icon || "tag");
+				const label = picker.label || key;
+				const textEl = triggerEl.createSpan({ cls: "diary-mood-text", text: matchedOption.name || label });
+				if (matchedOption.color) {
+					textEl.style.color = matchedOption.color;
+				}
+			} else {
+				triggerEl.createSpan({ cls: "diary-mood-placeholder", text: picker.label || key });
+			}
+			triggerEl.addEventListener("click", (evt) => {
+				this.toggleCustomPicker(triggerEl, content, picker);
+				evt.stopPropagation();
+			});
+		}
 
 		const calendarEl = pageEl.createDiv({ cls: "diary-calendar" });
 		const weekendDays = this.plugin.settings.weekendDays;
@@ -718,7 +750,7 @@ export class DiaryView extends ItemView {
 		const promptMetaEl = promptCardEl.createDiv({ cls: "diary-prompt-meta" });
 		const promptLabelEl = promptMetaEl.createDiv({ cls: "diary-prompt-label" });
 		const headphoneEl = promptLabelEl.createDiv({ cls: "diary-prompt-label-icon" });
-		setIcon(headphoneEl, "notebook-text");
+		setIcon(headphoneEl, "quote");
 		promptLabelEl.createSpan({ text: content.promptTitle });
 		promptMetaEl.createSpan({ cls: "diary-prompt-time", text: content.time });
 
@@ -759,7 +791,12 @@ export class DiaryView extends ItemView {
 		const intentionHeadEl = intentionWrapEl.createDiv({ cls: "diary-intention-head" });
 		const intentionLabelEl = intentionHeadEl.createDiv({ cls: "diary-intention-label" });
 		const quillEl = intentionLabelEl.createDiv({ cls: "diary-intention-icon" });
-		setIcon(quillEl, content.exists ? "notebook-tabs" : "file-plus-2");
+		const isMobile = Platform.isMobileApp;
+		if (isMobile) {
+        	setIcon(quillEl, "notepad-text-dashed"); // 移动端
+		} else {
+			setIcon(quillEl, "book-open-text");      // 桌面端
+		}
 		intentionLabelEl.createDiv({
 			cls: "diary-intention-title",
 			text: content.exists ? t("content.heading", lang) : t("content.empty-title", lang),
@@ -919,6 +956,19 @@ export class DiaryView extends ItemView {
 		cloudEl.createDiv({ cls: "diary-artwork-cloud-part is-left" });
 		cloudEl.createDiv({ cls: "diary-artwork-cloud-part is-center" });
 		cloudEl.createDiv({ cls: "diary-artwork-cloud-part is-right" });
+	}
+
+	private renderDefaultArtwork(artworkEl: HTMLElement): void {
+		artworkEl.removeClass("has-custom-image");
+		artworkEl.empty();
+		const skyEl = artworkEl.createDiv({ cls: "diary-artwork-sky" });
+		this.renderCloud(skyEl, "is-main");
+		this.renderCloud(skyEl, "is-small");
+		const seaEl = artworkEl.createDiv({ cls: "diary-artwork-sea" });
+		const boatEl = seaEl.createDiv({ cls: "diary-artwork-boat" });
+		boatEl.createDiv({ cls: "diary-artwork-boat-person" });
+		boatEl.createDiv({ cls: "diary-artwork-boat-base" });
+		artworkEl.createDiv({ cls: "diary-artwork-sand" });
 	}
 
 	private toggleDatePicker(anchorEl: HTMLElement, currentDate: DiaryDateItem): void {
@@ -1162,6 +1212,176 @@ export class DiaryView extends ItemView {
 		this.moodPickerOpen = false;
 	}
 
+	private toggleCustomPicker(anchorEl: HTMLElement, content: DiaryPageContent, picker: CustomFrontmatterPicker): void {
+		if (this.customPickerOpen) {
+			this.closeCustomPicker();
+			return;
+		}
+
+		this.customPickerOpen = true;
+
+		const panelEl = activeDocument.body.createDiv({ cls: "diary-mood-picker diary-custom-picker" });
+		this.renderCustomPickerContent(panelEl, content, picker);
+
+		const anchorRect = anchorEl.getBoundingClientRect();
+		const panelHeight = panelEl.offsetHeight || 300;
+		const panelWidth = panelEl.offsetWidth || 260;
+		let top = anchorRect.bottom + 8;
+		let left = anchorRect.left + anchorRect.width / 2 - panelWidth / 2;
+		if (top + panelHeight > window.innerHeight) {
+			top = anchorRect.top - panelHeight - 8;
+		}
+		if (left < 8) left = 8;
+		if (left + panelWidth > window.innerWidth - 8) left = window.innerWidth - panelWidth - 8;
+		panelEl.style.top = `${top}px`;
+		panelEl.style.left = `${left}px`;
+
+		const onClickOutside = (evt: MouseEvent): void => {
+			if (!panelEl.contains(evt.target as Node) && evt.target !== anchorEl) {
+				this.closeCustomPicker();
+			}
+		};
+
+		const onKeyDown = (evt: KeyboardEvent): void => {
+			if (evt.key === "Escape") {
+				this.closeCustomPicker();
+			}
+		};
+
+		activeDocument.addEventListener("click", onClickOutside, true);
+		activeDocument.addEventListener("keydown", onKeyDown);
+		this.customPickerCleanup = () => {
+			activeDocument.removeEventListener("click", onClickOutside, true);
+			activeDocument.removeEventListener("keydown", onKeyDown);
+			panelEl.remove();
+		};
+	}
+
+	private closeCustomPicker(): void {
+		if (this.customPickerCleanup) {
+			this.customPickerCleanup();
+			this.customPickerCleanup = null;
+		}
+		this.customPickerOpen = false;
+	}
+
+	private renderCustomPickerContent(panelEl: HTMLElement, content: DiaryPageContent, picker: CustomFrontmatterPicker): void {
+		const lang = this.lang();
+		const key = picker.key.trim();
+		const currentValue = content.customFrontmatterValues[key] ?? null;
+
+		const headerEl = panelEl.createDiv({ cls: "diary-mood-picker-header" });
+		headerEl.createDiv({ cls: "diary-mood-picker-title", text: picker.label || key });
+		if (currentValue) {
+			const clearBtn = headerEl.createEl("button", {
+				cls: "diary-mood-picker-clear",
+				attr: {
+					type: "button",
+					"aria-label": t("custom-picker.clear", lang),
+					title: t("custom-picker.clear", lang),
+				},
+			});
+			setIcon(clearBtn, "x");
+			clearBtn.addEventListener("click", (evt) => {
+				evt.stopPropagation();
+				this.closeCustomPicker();
+				void this.applyCustomFrontmatterChange(content.filePath, key, null);
+			});
+		}
+
+		const gridEl = panelEl.createDiv({ cls: "diary-mood-picker-grid" });
+		for (const opt of picker.options) {
+			const isActive = currentValue === opt.name || currentValue === opt.icon;
+			const itemEl = gridEl.createEl("button", {
+				cls: `diary-mood-picker-item${isActive ? " is-active" : ""}`,
+				attr: {
+					type: "button",
+					"aria-label": opt.name || opt.icon,
+					title: opt.name || opt.icon,
+				},
+			});
+			const iconEl = itemEl.createDiv({ cls: "diary-mood-picker-icon" });
+			if (opt.color) {
+				iconEl.style.color = opt.color;
+			}
+			setIcon(iconEl, opt.icon || "tag");
+			const labelEl = itemEl.createSpan({ cls: "diary-mood-picker-label", text: opt.name || opt.icon });
+			if (opt.color) {
+				labelEl.style.color = opt.color;
+			}
+			itemEl.addEventListener("click", (evt) => {
+				evt.stopPropagation();
+				this.closeCustomPicker();
+				void this.applyCustomFrontmatterChange(content.filePath, key, opt.name);
+			});
+		}
+	}
+
+	private async applyCustomFrontmatterChange(filePath: string, key: string, value: string | null): Promise<void> {
+		let file = this.app.vault.getAbstractFileByPath(filePath);
+		if (!(file instanceof TFile)) {
+			await this.ensureParentFolder(filePath);
+			this.plugin.suppressVaultRefresh(filePath, 1500);
+			file = await this.app.vault.create(filePath, "");
+		}
+
+		if (!(file instanceof TFile)) {
+			return;
+		}
+
+		try {
+			this.plugin.suppressVaultRefresh(filePath, 1500);
+			await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
+				if (value === null) {
+					delete frontmatter[key];
+				} else {
+					frontmatter[key] = value;
+				}
+			});
+		} catch (error) {
+			console.warn("Failed to save custom frontmatter", error);
+		}
+
+		const cached = this.renderedContentByPath.get(filePath);
+		if (cached) {
+			cached.customFrontmatterValues[key] = value;
+		}
+
+		this.markFileCreated(filePath);
+		this.updateCustomPickerDisplay(filePath);
+	}
+
+	private updateCustomPickerDisplay(filePath: string): void {
+		const pickers = this.plugin.settings.customFrontmatterPickers;
+		const cached = this.renderedContentByPath.get(filePath);
+		const triggers = Array.from(this.contentEl.querySelectorAll<HTMLElement>(`.diary-custom-trigger[data-file-path="${CSS.escape(filePath)}"]`));
+		for (const triggerEl of triggers) {
+			const key = triggerEl.dataset.pickerKey;
+			if (!key) continue;
+			const picker = pickers.find((p) => p.key.trim() === key);
+			if (!picker) continue;
+			const currentValue = cached?.customFrontmatterValues[key] ?? null;
+			const matchedOption = currentValue
+				? picker.options.find((opt) => opt.name === currentValue || opt.icon === currentValue)
+				: null;
+			triggerEl.empty();
+			triggerEl.classList.toggle("has-mood", !!matchedOption);
+			if (matchedOption) {
+				const iconEl = triggerEl.createDiv({ cls: "diary-mood-icon" });
+				if (matchedOption.color) {
+					iconEl.style.color = matchedOption.color;
+				}
+				setIcon(iconEl, matchedOption.icon || "tag");
+				const textEl = triggerEl.createSpan({ cls: "diary-mood-text", text: matchedOption.name || picker.label || key });
+				if (matchedOption.color) {
+					textEl.style.color = matchedOption.color;
+				}
+			} else {
+				triggerEl.createSpan({ cls: "diary-mood-placeholder", text: picker.label || key });
+			}
+		}
+	}
+
 	private renderMoodPickerContent(panelEl: HTMLElement, content: DiaryPageContent): void {
 		const lang = this.lang();
 		const allIcons = getAllMoodIcons(this.plugin.settings.customMoodIcons, lang);
@@ -1255,7 +1475,7 @@ export class DiaryView extends ItemView {
 
 	private updateMoodDisplay(filePath: string, iconName: string | null, description: string | null): void {
 		const lang = this.lang();
-		const moodTriggers = Array.from(this.contentEl.querySelectorAll<HTMLElement>(`.diary-mood-trigger[data-file-path="${CSS.escape(filePath)}"]`));
+		const moodTriggers = Array.from(this.contentEl.querySelectorAll<HTMLElement>(`.diary-mood-trigger[data-file-path="${CSS.escape(filePath)}"]:not(.diary-custom-trigger)`));
 		const match = iconName ? this.resolveMoodIcon(iconName) : null;
 		for (const triggerEl of moodTriggers) {
 			triggerEl.empty();
@@ -1630,6 +1850,14 @@ export class DiaryView extends ItemView {
 		const moodFrontmatterKey = this.plugin.settings.moodFrontmatterKey?.trim() || "daily-mood";
 		const rawMood = readFrontmatterString(frontmatter, moodFrontmatterKey);
 		const moodMatch = rawMood ? this.resolveMoodIcon(rawMood) : null;
+		const customFrontmatterValues: Record<string, string | null> = {};
+		for (const picker of this.plugin.settings.customFrontmatterPickers) {
+			const key = picker.key.trim();
+			if (key) {
+				customFrontmatterValues[key] = readFrontmatterString(frontmatter, key);
+			}
+		}
+
 		return {
 			imageCaption: file.basename,
 			artworkImage,
@@ -1646,6 +1874,7 @@ export class DiaryView extends ItemView {
 			weatherValue: rawWeather,
 			moodIconName: moodMatch?.name ?? rawMood,
 			moodDescription: moodMatch?.description ?? null,
+			customFrontmatterValues,
 		};
 	}
 
@@ -1679,6 +1908,7 @@ export class DiaryView extends ItemView {
 			weatherValue: null,
 			moodIconName: null,
 			moodDescription: null,
+			customFrontmatterValues: {},
 		};
 	}
 
@@ -2586,7 +2816,7 @@ export class DiaryView extends ItemView {
 		const contentBeforeCursor = textareaEl.value.slice(0, cursor);
 		const contentAfterCursor = textareaEl.value.slice(cursor) || ".";
 
-		mirrorEl.setCssProps({
+		Object.assign(mirrorEl.style, {
 			position: "absolute",
 			visibility: "hidden",
 			pointerEvents: "none",

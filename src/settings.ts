@@ -3,6 +3,18 @@ import type DiaryViewPlugin from "./main";
 import type { MoodIconItem } from "./diary/mood";
 import { t, LANGUAGES, type Language } from "./i18n";
 
+export interface CustomFrontmatterOption {
+	name: string;
+	icon: string;
+	color?: string;
+}
+
+export interface CustomFrontmatterPicker {
+	key: string;
+	label: string;
+	options: CustomFrontmatterOption[];
+}
+
 /**
  * Detect the user's preferred language from Obsidian's locale setting.
  * Falls back to browser language, then English.
@@ -38,6 +50,7 @@ export interface DiaryViewSettings {
 	useFirstImageAsArtwork: boolean;
 	moodFrontmatterKey: string;
 	customMoodIcons: MoodIconItem[];
+	customFrontmatterPickers: CustomFrontmatterPicker[];
 }
 
 export const DEFAULT_SETTINGS: DiaryViewSettings = {
@@ -52,6 +65,7 @@ export const DEFAULT_SETTINGS: DiaryViewSettings = {
 	useFirstImageAsArtwork: false,
 	moodFrontmatterKey: "daily-mood",
 	customMoodIcons: [],
+	customFrontmatterPickers: [],
 };
 
 export class DiaryViewSettingTab extends PluginSettingTab {
@@ -266,6 +280,200 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 						this.display();
 					});
 			});
+
+		// ── Custom frontmatter pickers ──
+		containerEl.createDiv({ cls: "diary-settings-mood-heading", text: t("settings.custom-picker.heading", lang) });
+		containerEl.createDiv({
+			cls: "diary-settings-mood-desc",
+			text: t("settings.custom-picker.desc", lang),
+		});
+
+		this.renderCustomFrontmatterPickers(containerEl);
+
+		new Setting(containerEl)
+			.setName(t("settings.custom-picker.add-btn", lang))
+			.addButton((btn) => {
+				btn
+					.setButtonText(t("settings.custom-picker.add-btn", lang))
+					.setClass("diary-settings-mood-add-btn")
+					.onClick(async () => {
+						this.plugin.settings.customFrontmatterPickers.push({
+							key: "",
+							label: "",
+							options: [],
+						});
+						await this.plugin.saveSettings();
+						this.display();
+					});
+			});
+	}
+
+	private renderCustomFrontmatterPickers(containerEl: HTMLElement): void {
+		const lang = this.lang();
+		const pickers = this.plugin.settings.customFrontmatterPickers;
+		for (let i = 0; i < pickers.length; i++) {
+			const index = i;
+			const picker = pickers[index]!;
+			const cardEl = containerEl.createDiv({ cls: "diary-settings-picker-card" });
+
+			const headerEl = cardEl.createDiv({ cls: "diary-settings-picker-card-header" });
+			const fieldsEl = headerEl.createDiv({ cls: "diary-settings-picker-card-fields" });
+			const keyInput = fieldsEl.createEl("input", {
+				cls: "diary-settings-mood-input",
+				attr: {
+					type: "text",
+					placeholder: t("settings.custom-picker.key-placeholder", lang),
+					value: picker.key,
+				},
+			});
+			const labelInput = fieldsEl.createEl("input", {
+				cls: "diary-settings-mood-input",
+				attr: {
+					type: "text",
+					placeholder: t("settings.custom-picker.label-placeholder", lang),
+					value: picker.label,
+				},
+			});
+
+			keyInput.addEventListener("input", () => {
+				void (async () => {
+					this.plugin.settings.customFrontmatterPickers[index]!.key = keyInput.value.trim();
+					await this.plugin.saveSettings();
+					await this.plugin.refreshAllDiaryViews();
+				})();
+			});
+
+			labelInput.addEventListener("input", () => {
+				void (async () => {
+					this.plugin.settings.customFrontmatterPickers[index]!.label = labelInput.value.trim();
+					await this.plugin.saveSettings();
+					await this.plugin.refreshAllDiaryViews();
+				})();
+			});
+
+			headerEl.createEl("button", {
+				cls: "diary-settings-picker-card-remove",
+				attr: {
+					type: "button",
+					"aria-label": t("settings.custom-picker.remove-tooltip", lang),
+					title: t("settings.custom-picker.remove-tooltip", lang),
+				},
+			}, (btnEl) => {
+				setIcon(btnEl, "trash-2");
+				btnEl.addEventListener("click", async () => {
+					this.plugin.settings.customFrontmatterPickers.splice(index, 1);
+					await this.plugin.saveSettings();
+					this.display();
+					await this.plugin.refreshAllDiaryViews();
+				});
+			});
+
+			const optionsWrap = cardEl.createDiv({ cls: "diary-settings-picker-options" });
+			const options = picker.options;
+			for (let j = 0; j < options.length; j++) {
+				const optIndex = j;
+				const opt = options[optIndex]!;
+				const optSetting = new Setting(optionsWrap)
+					.setClass("diary-settings-mood-item");
+
+				const iconPreview = optSetting.controlEl.createDiv({ cls: "diary-settings-mood-preview" });
+				if (opt.color) {
+					iconPreview.style.color = opt.color;
+				}
+				if (opt.icon) {
+					setIcon(iconPreview, opt.icon);
+				}
+
+				const optFields = optSetting.controlEl.createDiv({ cls: "diary-settings-mood-fields" });
+				const iconInput = optFields.createEl("input", {
+					cls: "diary-settings-mood-input",
+					attr: {
+						type: "text",
+						placeholder: t("settings.custom-mood.name-placeholder", lang),
+						value: opt.icon,
+					},
+				});
+				const nameInput = optFields.createEl("input", {
+					cls: "diary-settings-mood-input",
+					attr: {
+						type: "text",
+						placeholder: t("settings.custom-mood.desc-placeholder", lang),
+						value: opt.name,
+					},
+				});
+				const colorInput = optFields.createEl("input", {
+					cls: "diary-settings-mood-color",
+					attr: {
+						type: "color",
+						title: t("settings.custom-mood.color-tooltip", lang),
+					},
+				});
+				colorInput.value = (opt.color && /^#[0-9a-fA-F]{6}$/.test(opt.color)) ? opt.color : "#9e9e9e";
+				colorInput.setCssProps({
+					height: "28px",
+					width: "40px",
+					padding: "0",
+					border: "none",
+					cursor: "pointer",
+				});
+
+				const updateOptPreview = (): void => {
+					iconPreview.empty();
+					iconPreview.style.color = opt.color || "";
+					if (iconInput.value.trim()) {
+						setIcon(iconPreview, iconInput.value.trim());
+					}
+				};
+
+				iconInput.addEventListener("input", () => {
+					void (async () => {
+						this.plugin.settings.customFrontmatterPickers[index]!.options[optIndex]!.icon = iconInput.value.trim();
+						updateOptPreview();
+						await this.plugin.saveSettings();
+						await this.plugin.refreshAllDiaryViews();
+					})();
+				});
+				nameInput.addEventListener("input", () => {
+					void (async () => {
+						this.plugin.settings.customFrontmatterPickers[index]!.options[optIndex]!.name = nameInput.value.trim();
+						await this.plugin.saveSettings();
+						await this.plugin.refreshAllDiaryViews();
+					})();
+				});
+				colorInput.addEventListener("input", () => {
+					void (async () => {
+						this.plugin.settings.customFrontmatterPickers[index]!.options[optIndex]!.color = colorInput.value.trim();
+						updateOptPreview();
+						await this.plugin.saveSettings();
+						await this.plugin.refreshAllDiaryViews();
+					})();
+				});
+
+				optSetting.addExtraButton((extraBtn) => {
+					extraBtn
+						.setIcon("trash-2")
+						.setTooltip(t("settings.custom-picker.remove-tooltip", lang))
+						.onClick(async () => {
+							this.plugin.settings.customFrontmatterPickers[index]!.options.splice(optIndex, 1);
+							await this.plugin.saveSettings();
+							this.display();
+							await this.plugin.refreshAllDiaryViews();
+						});
+				});
+			}
+
+			optionsWrap.createEl("button", {
+				cls: "diary-settings-picker-option-add",
+				attr: {
+					type: "button",
+				},
+				text: t("settings.custom-picker.add-option", lang),
+			}).addEventListener("click", async () => {
+				this.plugin.settings.customFrontmatterPickers[index]!.options.push({ name: "", icon: "" });
+				await this.plugin.saveSettings();
+				this.display();
+			});
+		}
 	}
 
 	private renderCustomMoodIcons(containerEl: HTMLElement): void {
