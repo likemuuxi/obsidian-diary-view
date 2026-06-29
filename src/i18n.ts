@@ -35,6 +35,8 @@ const dict: Record<string, Record<Language, string>> = {
 	"caption.placeholder":                   { en: "Add image description...",     zh: "添加图片描述..." },
 	"settings.use-first-image.name":         { en: "Use first image as artwork",   zh: "使用首张图片作为插图" },
 	"settings.use-first-image.desc":         { en: "When enabled and no image frontmatter is set, the first image in the daily note is used as the diary artwork. When disabled, the default illustration is shown.", zh: "启用后，若未设置图片 frontmatter，日记中的第一张图片将被用作日记插图。禁用则显示默认插图。" },
+	"settings.auto-update-first-image.name": { en: "Auto-update first image to frontmatter", zh: "首图自动更新到封面 frontmatter" },
+	"settings.auto-update-first-image.desc": { en: "When enabled, the first image in the daily note will automatically update the diary image frontmatter key. This ensures the artwork stays synchronized with the note content.", zh: "启用后，日记中的第一张图片会自动更新到封面 frontmatter 键值，确保插图与日记内容保持同步。" },
 	"settings.custom-mood.name-placeholder": { en: "Lucide icon name (e.g. smile)",zh: "Lucide 图标名（如 smile）" },
 	"settings.custom-mood.desc-placeholder": { en: "Description (e.g. Happy)",     zh: "描述（如 开心）" },
 	"settings.custom-mood.color-tooltip":    { en: "Color",                        zh: "颜色" },
@@ -130,6 +132,10 @@ const dict: Record<string, Record<Language, string>> = {
 	"wikilink.type-heading":                 { en: "Heading",                      zh: "标题" },
 	"wikilink.type-paragraph":               { en: "Paragraph",                    zh: "段落" },
 	"wikilink.type-block":                   { en: "Block",                        zh: "块" },
+
+	// ── Image picker ──
+	"image-picker.no-images":                { en: "No image files found in vault.", zh: "仓库中没有找到图片文件" },
+	"image-picker.update-failed":            { en: "Failed to update diary image.", zh: "更新日记图片失败" },
 };
 
 // ── Helper ──

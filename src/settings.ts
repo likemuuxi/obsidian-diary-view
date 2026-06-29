@@ -77,6 +77,7 @@ export interface DiaryViewSettings {
 	startOfWeek: number;
 	weekendDays: number[];
 	useFirstImageAsArtwork: boolean;
+	autoUpdateFirstImageToFrontmatter: boolean;
 	customFrontmatterPickers: CustomFrontmatterPicker[];
 }
 
@@ -266,6 +267,7 @@ export const DEFAULT_SETTINGS: DiaryViewSettings = {
 	startOfWeek: 1,
 	weekendDays: [0, 6],
 	useFirstImageAsArtwork: false,
+	autoUpdateFirstImageToFrontmatter: false,
 	customFrontmatterPickers: [
 		createBuiltinWeatherPicker("daily-weather", defaultLanguage),
 		createBuiltinMoodPicker("daily-mood", defaultLanguage),
@@ -438,6 +440,18 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 						this.plugin.settings.useFirstImageAsArtwork = value;
 						await this.plugin.saveSettings();
 						await this.plugin.refreshAllDiaryViews();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName(t("settings.auto-update-first-image.name", lang))
+			.setDesc(t("settings.auto-update-first-image.desc", lang))
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.autoUpdateFirstImageToFrontmatter)
+					.onChange(async (value) => {
+						this.plugin.settings.autoUpdateFirstImageToFrontmatter = value;
+						await this.plugin.saveSettings();
 					});
 			});
 

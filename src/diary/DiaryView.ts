@@ -1,4 +1,4 @@
-import { ItemView, MarkdownRenderer, moment as obsidianMoment, normalizePath, Notice, requestUrl, setIcon, TFile, TFolder, WorkspaceLeaf ,Platform} from "obsidian";
+import { App, ItemView, MarkdownRenderer, moment as obsidianMoment, normalizePath, Notice, requestUrl, setIcon, TFile, TFolder, WorkspaceLeaf ,Platform, FuzzySuggestModal} from "obsidian";
 import $ from "jquery";
 import "turn.js";
 import type * as Moment from "moment";
@@ -623,6 +623,9 @@ export class DiaryView extends ItemView {
 
 		const artworkWrapEl = pageEl.createDiv({ cls: "diary-artwork-wrap" });
 		const artworkCardEl = artworkWrapEl.createDiv({ cls: "diary-artwork-card" });
+		artworkCardEl.addEventListener("dblclick", () => {
+			this.openImagePicker(content.filePath);
+		});
 		const artworkEl = artworkCardEl.createDiv({ cls: "diary-artwork" });
 		const artworkImageSource = this.resolveArtworkImageSource(content.artworkImage, content.filePath);
 		if (artworkImageSource) {
@@ -1953,13 +1956,45 @@ export class DiaryView extends ItemView {
 				: nextBody;
 			this.plugin.suppressVaultRefresh(path);
 			await this.app.vault.modify(file, nextContent);
+
+			// Auto-update first image to frontmatter if enabled
+			if (this.plugin.settings.autoUpdateFirstImageToFrontmatter) {
+				await this.autoUpdateFirstImageToFrontmatter(file, nextBody);
+			}
 		} else {
 			await this.ensureParentFolder(path);
 			const nextBody = writeAllBodyUnderHeadings("", this.plugin.settings.dailyNoteHeading, sections);
 			this.plugin.suppressVaultRefresh(path);
-			await this.app.vault.create(path, nextBody);
+			const newFile = await this.app.vault.create(path, nextBody);
+
+			// Auto-update first image to frontmatter if enabled
+			if (this.plugin.settings.autoUpdateFirstImageToFrontmatter && newFile instanceof TFile) {
+				await this.autoUpdateFirstImageToFrontmatter(newFile, nextBody);
+			}
 		}
 		this.drafts.set(path, normalizedMarkdown);
+	}
+
+	private async autoUpdateFirstImageToFrontmatter(file: TFile, body: string): Promise<void> {
+		const firstImage = extractFirstImage(body);
+		if (!firstImage) {
+			return;
+		}
+
+		const imageKey = this.plugin.settings.dailyImageFrontmatterKey || DEFAULT_DAILY_IMAGE_FRONTMATTER_KEY;
+		try {
+			this.plugin.suppressVaultRefresh(file.path, 1000);
+			await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
+				frontmatter[imageKey] = firstImage;
+			});
+
+			const cached = this.renderedContentByPath.get(file.path);
+			if (cached) {
+				cached.artworkImage = firstImage;
+			}
+		} catch (error) {
+			console.warn("Failed to auto-update first image to frontmatter", error);
+		}
 	}
 
 	private parseSectionsFromMarkdown(markdown: string): DiarySection[] {
@@ -2650,5 +2685,79 @@ export class DiaryView extends ItemView {
 			top,
 			lineHeight,
 		};
+	}
+
+	private openImagePicker(filePath: string): void {
+		const imageFiles = this.app.vault.getFiles().filter((file) =>
+			file.extension.match(/^png|jpe?g|gif|bmp|webp|svg|ico$/i)
+		);
+
+		if (imageFiles.length === 0) {
+			new Notice(t("image-picker.no-images", this.lang()));
+			return;
+		}
+
+		const modal = new ImagePickerModal(this.app, imageFiles, (selectedFile) => {
+			void this.updateArtworkImage(filePath, selectedFile);
+		});
+		modal.open();
+	}
+
+	private async updateArtworkImage(filePath: string, imageFile: TFile): Promise<void> {
+		let file = this.app.vault.getAbstractFileByPath(filePath);
+		if (!(file instanceof TFile)) {
+			await this.ensureParentFolder(filePath);
+			this.plugin.suppressVaultRefresh(filePath, 1500);
+			file = await this.app.vault.create(filePath, "");
+		}
+
+		if (!(file instanceof TFile)) {
+			return;
+		}
+
+		const imageKey = this.plugin.settings.dailyImageFrontmatterKey || DEFAULT_DAILY_IMAGE_FRONTMATTER_KEY;
+		const wikilink = `[[${imageFile.path}]]`;
+
+		try {
+			this.plugin.suppressVaultRefresh(filePath, 1500);
+			await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
+				frontmatter[imageKey] = wikilink;
+			});
+
+			const cached = this.renderedContentByPath.get(filePath);
+			if (cached) {
+				cached.artworkImage = wikilink;
+			}
+
+			this.markFileCreated(filePath);
+			void this.render();
+		} catch (error) {
+			console.warn("Failed to update artwork image", error);
+			new Notice(t("image-picker.update-failed", this.lang()));
+		}
+	}
+}
+
+class ImagePickerModal extends FuzzySuggestModal<TFile> {
+	private imageFiles: TFile[];
+	private onChoose: (file: TFile) => void;
+
+	constructor(app: App, imageFiles: TFile[], onChoose: (file: TFile) => void) {
+		super(app);
+		this.imageFiles = imageFiles;
+		this.onChoose = onChoose;
+		this.setPlaceholder("选择图片文件...");
+	}
+
+	getItems(): TFile[] {
+		return this.imageFiles;
+	}
+
+	getItemText(file: TFile): string {
+		return file.path;
+	}
+
+	onChooseItem(file: TFile, evt: MouseEvent | KeyboardEvent): void {
+		this.onChoose(file);
 	}
 }
