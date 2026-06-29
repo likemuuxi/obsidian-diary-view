@@ -1,6 +1,5 @@
 import { App, ItemView, MarkdownRenderer, moment as obsidianMoment, normalizePath, Notice, requestUrl, setIcon, TFile, TFolder, WorkspaceLeaf ,Platform, FuzzySuggestModal} from "obsidian";
-import $ from "jquery";
-import "turn.js";
+import { PageFlip } from "page-flip";
 import type * as Moment from "moment";
 import type DiaryViewPlugin from "../main";
 import {
@@ -63,10 +62,6 @@ interface DiaryPageContent {
 	customFrontmatterValues: Record<string, string | null>;
 }
 
-type TurnBook = {
-	turn: (...args: unknown[]) => unknown;
-};
-
 export class DiaryView extends ItemView {
 	private plugin: DiaryViewPlugin;
 	private dates: DiaryDateItem[] = [];
@@ -87,14 +82,13 @@ export class DiaryView extends ItemView {
 	private datePickerCleanup: (() => void) | null = null;
 	private customPickerOpen = false;
 	private customPickerCleanup: (() => void) | null = null;
-	private usingTurnBook = false;
-	private turnBookEl: HTMLElement | null = null;
-	private turnViewportEl: HTMLElement | null = null;
-	private turnLeftFillEl: HTMLElement | null = null;
-	private turnRightFillEl: HTMLElement | null = null;
-	private turnBookReady = false;
-	private turnResizeObserver: ResizeObserver | null = null;
-	private turnResizeFrame: number | null = null;
+	private usingPageFlip = false;
+	private pageFlip: InstanceType<typeof PageFlip> | null = null;
+	private pageFlipEl: HTMLElement | null = null;
+	private pageFlipViewportEl: HTMLElement | null = null;
+	private pageFlipReady = false;
+	private pageFlipResizeObserver: ResizeObserver | null = null;
+	private pageFlipResizeFrame: number | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: DiaryViewPlugin) {
 		super(leaf);
@@ -122,20 +116,14 @@ export class DiaryView extends ItemView {
 	async onOpen(): Promise<void> {
 		this.containerEl.addClass("diary-view");
 		this.registerDomEvent(window, "resize", () => {
-			const shouldUseTurnBook = this.shouldUsePageFlip();
-			if (shouldUseTurnBook !== this.usingTurnBook) {
+			const shouldUsePageFlip = this.shouldUsePageFlip();
+			if (shouldUsePageFlip !== this.usingPageFlip) {
 				void this.render();
 				return;
 			}
-			if (shouldUseTurnBook) {
-				this.scheduleTurnBookResize();
+			if (shouldUsePageFlip) {
+				this.schedulePageFlipResize();
 			}
-		});
-		this.registerDomEvent(window, "mouseup", () => {
-			this.hideTurnDragFills();
-		});
-		this.registerDomEvent(window, "blur", () => {
-			this.hideTurnDragFills();
 		});
 		await this.render();
 	}
@@ -143,11 +131,12 @@ export class DiaryView extends ItemView {
 	async onClose(): Promise<void> {
 		this.closeDatePicker();
 		this.closeCustomPicker();
-		this.turnResizeObserver?.disconnect();
-		this.turnResizeObserver = null;
-		if (this.turnResizeFrame !== null) {
-			window.cancelAnimationFrame(this.turnResizeFrame);
-			this.turnResizeFrame = null;
+		this.destroyPageFlip();
+		this.pageFlipResizeObserver?.disconnect();
+		this.pageFlipResizeObserver = null;
+		if (this.pageFlipResizeFrame !== null) {
+			window.cancelAnimationFrame(this.pageFlipResizeFrame);
+			this.pageFlipResizeFrame = null;
 		}
 		await this.flushPendingSaves();
 		this.contentEl.empty();
@@ -165,8 +154,8 @@ export class DiaryView extends ItemView {
 		this.closeDatePicker();
 		this.closeCustomPicker();
 		const renderVersion = ++this.renderVersion;
-		const useTurnBook = this.shouldUsePageFlip();
-		const contentIds = useTurnBook
+		const usePageFlip = this.shouldUsePageFlip();
+		const contentIds = usePageFlip
 			? this.dates.map((date) => date.id)
 			: [this.getDateById(this.activeDateId).id];
 		const contentById = await this.loadContentByIds(contentIds);
@@ -175,23 +164,30 @@ export class DiaryView extends ItemView {
 		}
 
 		this.renderedContentByPath = new Map(Array.from(contentById.values()).map((content) => [content.filePath, content]));
-		this.usingTurnBook = useTurnBook;
-		if (useTurnBook) {
-			await this.renderDesktopTurnBook(contentById);
+		this.usingPageFlip = usePageFlip;
+		if (usePageFlip) {
+			await this.renderDesktopPageFlip(contentById);
 		} else {
-			this.turnResizeObserver?.disconnect();
-			this.turnResizeObserver = null;
-			this.turnBookEl = null;
-			this.turnViewportEl = null;
-			this.turnLeftFillEl = null;
-			this.turnRightFillEl = null;
-			this.turnBookReady = false;
+			this.destroyPageFlip();
 			await this.renderMobileNotebook(contentById);
 		}
 	}
 
-	private async renderDesktopTurnBook(contentById: Map<string, DiaryPageContent>): Promise<void> {
+	private async renderDesktopPageFlip(contentById: Map<string, DiaryPageContent>): Promise<void> {
 		const { contentEl } = this;
+		// Destroy previous PageFlip instance before clearing DOM
+		// (destroy() removes the block element from DOM)
+		if (this.pageFlip) {
+			try {
+				this.pageFlip.destroy();
+			} catch {
+				// ignore
+			}
+			this.pageFlip = null;
+			this.pageFlipEl = null;
+			this.pageFlipViewportEl = null;
+			this.pageFlipReady = false;
+		}
 		contentEl.empty();
 
 		const shellEl = contentEl.createDiv({ cls: "diary-shell" });
@@ -199,36 +195,31 @@ export class DiaryView extends ItemView {
 		const notebookEl = stageEl.createDiv({ cls: "diary-notebook" });
 		notebookEl.createDiv({ cls: "diary-notebook-stitch" });
 
-		const pagesWrapEl = notebookEl.createDiv({ cls: "diary-pages-wrap is-turn-book" });
+		const pagesWrapEl = notebookEl.createDiv({ cls: "diary-pages-wrap is-page-flip" });
 		pagesWrapEl.createDiv({ cls: "diary-page-stack is-front" });
 		pagesWrapEl.createDiv({ cls: "diary-page-stack is-back" });
 
-		const viewportEl = pagesWrapEl.createDiv({ cls: "diary-turn-viewport" });
-		const leftFillEl = viewportEl.createDiv({ cls: "diary-turn-side-fill is-left" });
-		const rightFillEl = viewportEl.createDiv({ cls: "diary-turn-side-fill is-right" });
-		const turnBookEl = viewportEl.createDiv({ cls: "diary-turn-book" });
+		const viewportEl = pagesWrapEl.createDiv({ cls: "diary-page-flip-viewport" });
+		const pageFlipEl = viewportEl.createDiv({ cls: "diary-page-flip-book" });
 		const calendarDates = this.dates.slice(0, 7);
 
-		turnBookEl.createDiv({ cls: "diary-turn-sheet is-placeholder" });
+		// StPageFlip requires direct child .stf__item elements
 		for (const dateInfo of this.dates) {
 			const content = contentById.get(dateInfo.id) ?? this.createMissingContent(dateInfo);
-			const leftEl = turnBookEl.createDiv({ cls: "diary-turn-sheet is-left" });
+			const leftEl = pageFlipEl.createDiv({ cls: "diary-page-flip-sheet is-left" });
 			leftEl.dataset.dateId = dateInfo.id;
 			this.renderLeftPage(leftEl, dateInfo, content, calendarDates);
-			const rightEl = turnBookEl.createDiv({ cls: "diary-turn-sheet is-right" });
+			const rightEl = pageFlipEl.createDiv({ cls: "diary-page-flip-sheet is-right" });
 			rightEl.dataset.dateId = dateInfo.id;
 			await this.renderRightPage(rightEl, content);
 		}
 
-		this.turnBookEl = turnBookEl;
-		this.turnViewportEl = viewportEl;
-		this.turnLeftFillEl = leftFillEl;
-		this.turnRightFillEl = rightFillEl;
-		this.turnBookReady = false;
-		this.bindTurnDragGuard(viewportEl);
+		this.pageFlipEl = pageFlipEl;
+		this.pageFlipViewportEl = viewportEl;
+		this.pageFlipReady = false;
 		this.bindMouseSwipeGesture(pagesWrapEl);
-		this.ensureTurnBookInitialized();
-		this.attachTurnBookResize(viewportEl);
+		this.ensurePageFlipInitialized();
+		this.attachPageFlipResize(viewportEl);
 	}
 
 	private async renderMobileNotebook(contentById: Map<string, DiaryPageContent>): Promise<void> {
@@ -257,89 +248,110 @@ export class DiaryView extends ItemView {
 		await this.renderRightPage(rightBaseEl, currentContent);
 	}
 
-	private ensureTurnBookInitialized(): void {
-		if (!this.turnBookEl || !this.turnViewportEl || this.turnBookReady) {
+	private destroyPageFlip(): void {
+		if (this.pageFlip) {
+			try {
+				// StPageFlip.destroy() calls block.remove(), so only destroy when re-rendering
+				this.pageFlip.destroy();
+			} catch {
+				// ignore destroy errors
+			}
+			this.pageFlip = null;
+		}
+		this.pageFlipEl = null;
+		this.pageFlipViewportEl = null;
+		this.pageFlipReady = false;
+	}
+
+	private ensurePageFlipInitialized(): void {
+		if (!this.pageFlipEl || !this.pageFlipViewportEl || this.pageFlipReady) {
 			return;
 		}
 
-		const turnBook = this.getTurnBook();
-		if (!turnBook) {
-			this.usingTurnBook = false;
-			void this.render();
-			return;
-		}
-
-		const width = this.turnViewportEl.clientWidth;
-		const height = this.turnViewportEl.clientHeight;
+		const width = this.pageFlipViewportEl.clientWidth;
+		const height = this.pageFlipViewportEl.clientHeight;
 		if (!width || !height) {
-			this.scheduleTurnBookResize();
+			this.schedulePageFlipResize();
 			return;
 		}
 
-		const activeTurnPage = this.getTurnPageForDate(this.activeDateId) ?? 2;
-		turnBook.turn({
-			width,
-			height,
-			display: "double",
-			duration: 950,
-			gradients: true,
-			acceleration: true,
-			page: activeTurnPage,
-			pages: this.getTotalTurnPages(),
-			when: {
-				turning: (event: { preventDefault: () => void }, page: number) => {
-					if (page < this.getFirstTurnPage()) {
-						this.hideTurnDragFills();
-						event.preventDefault();
-						return;
-					}
-					this.updateCalendarActiveState(null);
-				},
-				turned: (_event: unknown, page: number) => {
-					this.hideTurnDragFills();
-					const nextDateId = this.getDateIdForTurnPage(page);
-					if (!nextDateId || nextDateId === this.activeDateId) {
-						return;
-					}
-					this.activeDateId = nextDateId;
-					this.updateCalendarActiveState();
-				},
-			},
+		// StPageFlip: width/height = single page dimensions
+		const pageWidth = Math.floor(width / 2);
+		const pageHeight = height;
+
+		const startPageIndex = this.getPageFlipIndexForDate(this.activeDateId);
+
+		const pageFlip = new PageFlip(this.pageFlipEl, {
+			width: pageWidth,
+			height: pageHeight,
+			size: "stretch",
+			minWidth: pageWidth,
+			maxWidth: pageWidth,
+			minHeight: pageHeight,
+			maxHeight: pageHeight,
+			drawShadow: true,
+			flippingTime: 700,
+			usePortrait: false,
+			startZIndex: 0,
+			autoSize: true,
+			maxShadowOpacity: 0.5,
+			showCover: false,
+			mobileScrollSupport: false,
+			useMouseEvents: false,
+			clickEventForward: true,
+			swipeDistance: 30,
+			showPageCorners: false,
+			disableFlipByClick: true,
+			startPage: startPageIndex,
 		});
-		this.turnBookReady = true;
+
+		const pages = Array.from(this.pageFlipEl.children) as HTMLElement[];
+		pageFlip.loadFromHTML(pages);
+
+		pageFlip.on("flip", (e: { data: number }) => {
+			const pageIndex = e.data;
+			const nextDateId = this.getDateIdForPageFlipIndex(pageIndex);
+			if (!nextDateId) {
+				return;
+			}
+			this.activeDateId = nextDateId;
+			this.updateCalendarActiveState();
+		});
+
+		pageFlip.on("changeState", () => {
+			this.updateCalendarActiveState();
+		});
+
+		this.pageFlip = pageFlip;
+		this.pageFlipReady = true;
 		this.updateCalendarActiveState();
 	}
 
-	private attachTurnBookResize(viewportEl: HTMLElement): void {
-		this.turnResizeObserver?.disconnect();
-		this.turnResizeObserver = new ResizeObserver(() => {
-			this.scheduleTurnBookResize();
+	private attachPageFlipResize(viewportEl: HTMLElement): void {
+		this.pageFlipResizeObserver?.disconnect();
+		this.pageFlipResizeObserver = new ResizeObserver(() => {
+			this.schedulePageFlipResize();
 		});
-		this.turnResizeObserver.observe(viewportEl);
+		this.pageFlipResizeObserver.observe(viewportEl);
 	}
 
-	private scheduleTurnBookResize(): void {
-		if (this.turnResizeFrame !== null) {
-			window.cancelAnimationFrame(this.turnResizeFrame);
+	private schedulePageFlipResize(): void {
+		if (this.pageFlipResizeFrame !== null) {
+			window.cancelAnimationFrame(this.pageFlipResizeFrame);
 		}
-		this.turnResizeFrame = window.requestAnimationFrame(() => {
-			this.turnResizeFrame = null;
-			if (!this.turnBookEl || !this.turnViewportEl) {
+		this.pageFlipResizeFrame = window.requestAnimationFrame(() => {
+			this.pageFlipResizeFrame = null;
+			if (!this.pageFlipEl || !this.pageFlipViewportEl) {
 				return;
 			}
 
-			if (!this.turnBookReady) {
-				this.ensureTurnBookInitialized();
+			if (!this.pageFlipReady || !this.pageFlip) {
+				this.ensurePageFlipInitialized();
 				return;
 			}
 
-			const width = this.turnViewportEl.clientWidth;
-			const height = this.turnViewportEl.clientHeight;
-			if (!width || !height) {
-				return;
-			}
-
-			this.getTurnBook()?.turn("size", width, height);
+			// StPageFlip.update() takes no arguments, just re-renders
+			this.pageFlip.update();
 		});
 	}
 
@@ -356,7 +368,7 @@ export class DiaryView extends ItemView {
 			pointerId = event.pointerId;
 			startX = event.clientX;
 			startY = event.clientY;
-			allowSwipe = !this.isNearNativeTurnCorner(event);
+			allowSwipe = !this.isNearPageFlipCorner(event);
 		});
 
 		targetEl.addEventListener("pointerup", (event) => {
@@ -368,19 +380,17 @@ export class DiaryView extends ItemView {
 			const deltaY = event.clientY - startY;
 			pointerId = null;
 			if (!allowSwipe) {
-				allowSwipe = false;
 				return;
 			}
-			allowSwipe = false;
 
 			if (Math.abs(deltaX) < SWIPE_MIN_DISTANCE_PX || Math.abs(deltaX) <= Math.abs(deltaY)) {
 				return;
 			}
 
 			if (deltaX < 0) {
-				this.turnToAdjacentDate("next");
+				this.flipToAdjacentDate("next");
 			} else {
-				this.turnToAdjacentDate("prev");
+				this.flipToAdjacentDate("prev");
 			}
 		});
 
@@ -392,119 +402,12 @@ export class DiaryView extends ItemView {
 		});
 	}
 
-	private bindTurnDragGuard(targetEl: HTMLElement): void {
-		targetEl.addEventListener("mousedown", (event) => {
-			if (this.shouldBlockBoundaryTurn(event)) {
-				event.preventDefault();
-				event.stopPropagation();
-				return;
-			}
-			if (this.shouldShowTurnDragFills(event)) {
-				this.showTurnDragFills();
-			}
-		}, true);
-	}
-
-	private shouldBlockBoundaryTurn(event: MouseEvent): boolean {
-		if (!this.turnViewportEl || this.isInteractiveTarget(event.target)) {
+	private isNearPageFlipCorner(event: PointerEvent): boolean {
+		if (!this.pageFlipViewportEl) {
 			return false;
 		}
 
-		const rect = this.turnViewportEl.getBoundingClientRect();
-		const localX = event.clientX - rect.left;
-		const localY = event.clientY - rect.top;
-		const nearLeftEdge = localX <= TURN_NATIVE_CORNER_SIZE_PX;
-		const nearTop = localY <= TURN_NATIVE_CORNER_SIZE_PX;
-		const nearBottom = localY >= rect.height - TURN_NATIVE_CORNER_SIZE_PX;
-		const isLeftCorner = nearLeftEdge && (nearTop || nearBottom);
-		if (!isLeftCorner) {
-			return false;
-		}
-
-		return this.activeDateId === this.dates[0]?.id;
-	}
-
-	private shouldShowTurnDragFills(event: MouseEvent): boolean {
-		if (!this.turnViewportEl || this.isInteractiveTarget(event.target)) {
-			return false;
-		}
-
-		const rect = this.turnViewportEl.getBoundingClientRect();
-		const localX = event.clientX - rect.left;
-		const localY = event.clientY - rect.top;
-		const nearLeftEdge = localX <= TURN_NATIVE_CORNER_SIZE_PX;
-		const nearRightEdge = localX >= rect.width - TURN_NATIVE_CORNER_SIZE_PX;
-		const nearTop = localY <= TURN_NATIVE_CORNER_SIZE_PX;
-		const nearBottom = localY >= rect.height - TURN_NATIVE_CORNER_SIZE_PX;
-		const isCorner = (nearLeftEdge || nearRightEdge) && (nearTop || nearBottom);
-		if (!isCorner) {
-			return false;
-		}
-
-		return nearLeftEdge || nearRightEdge;
-	}
-
-	private showTurnDragFills(): void {
-		if (!this.turnLeftFillEl || !this.turnRightFillEl) {
-			return;
-		}
-
-		this.syncTurnFillSide(this.turnLeftFillEl, this.getActiveLeftTurnSheet(), "left");
-		this.syncTurnFillSide(this.turnRightFillEl, this.getAdjacentRightTurnSheet(), "right");
-	}
-
-	private syncTurnFillSide(targetEl: HTMLElement, sourceEl: HTMLElement | null, side: "left" | "right"): void {
-		targetEl.empty();
-		if (!sourceEl) {
-			targetEl.removeClass("is-visible");
-			return;
-		}
-
-		const cloneEl = sourceEl.cloneNode(true);
-		if (!cloneEl.instanceOf(HTMLElement)) {
-			targetEl.removeClass("is-visible");
-			return;
-		}
-
-		cloneEl.removeClass("is-left", "is-right");
-		cloneEl.addClass("is-overlay-copy", `is-${side}`);
-		targetEl.appendChild(cloneEl);
-		targetEl.addClass("is-visible");
-	}
-
-	private hideTurnDragFills(): void {
-		for (const fillEl of [this.turnLeftFillEl, this.turnRightFillEl]) {
-			if (!fillEl) {
-				continue;
-			}
-			fillEl.removeClass("is-visible");
-			fillEl.empty();
-		}
-	}
-
-	private getActiveLeftTurnSheet(): HTMLElement | null {
-		if (!this.turnBookEl) {
-			return null;
-		}
-		return this.turnBookEl.querySelector<HTMLElement>(`.diary-turn-sheet.is-left[data-date-id="${this.activeDateId}"]`);
-	}
-
-	private getAdjacentRightTurnSheet(): HTMLElement | null {
-		if (!this.turnBookEl) {
-			return null;
-		}
-
-		const activeIndex = this.dates.findIndex((date) => date.id === this.activeDateId);
-		const nextDateId = this.dates[activeIndex + 1]?.id ?? this.activeDateId;
-		return this.turnBookEl.querySelector<HTMLElement>(`.diary-turn-sheet.is-right[data-date-id="${nextDateId}"]`);
-	}
-
-	private isNearNativeTurnCorner(event: PointerEvent): boolean {
-		if (!this.turnViewportEl) {
-			return false;
-		}
-
-		const rect = this.turnViewportEl.getBoundingClientRect();
+		const rect = this.pageFlipViewportEl.getBoundingClientRect();
 		const localX = event.clientX - rect.left;
 		const localY = event.clientY - rect.top;
 		const nearLeft = localX <= TURN_NATIVE_CORNER_SIZE_PX;
@@ -534,8 +437,8 @@ export class DiaryView extends ItemView {
 		return null;
 	}
 
-	private turnToAdjacentDate(direction: "next" | "prev"): void {
-		if (!this.turnBookEl || !this.turnBookReady) {
+	private flipToAdjacentDate(direction: "next" | "prev"): void {
+		if (!this.pageFlip || !this.pageFlipReady) {
 			return;
 		}
 
@@ -543,17 +446,21 @@ export class DiaryView extends ItemView {
 			return;
 		}
 
-		this.getTurnBook()?.turn(direction === "next" ? "next" : "previous");
+		if (direction === "next") {
+			this.pageFlip.flipNext();
+		} else {
+			this.pageFlip.flipPrev();
+		}
 	}
 
-	private turnToDate(nextDateId: string): void {
-		const nextTurnPage = this.getTurnPageForDate(nextDateId);
-		if (nextTurnPage === null) {
+	private flipToDate(nextDateId: string): void {
+		const nextPageIndex = this.getPageFlipIndexForDate(nextDateId);
+		if (nextPageIndex === null) {
 			return;
 		}
 
-		if (this.turnBookEl && this.turnBookReady) {
-			this.getTurnBook()?.turn("page", nextTurnPage);
+		if (this.pageFlip && this.pageFlipReady) {
+			this.pageFlip.flip(nextPageIndex);
 			return;
 		}
 
@@ -561,26 +468,15 @@ export class DiaryView extends ItemView {
 		void this.render();
 	}
 
-	private getTurnPageForDate(dateId: string): number | null {
+	private getPageFlipIndexForDate(dateId: string): number {
 		const index = this.dates.findIndex((date) => date.id === dateId);
-		return index === -1 ? null : index * 2 + 2;
+		return index === -1 ? 0 : index * 2;
 	}
 
-	private getDateIdForTurnPage(page: number): string | null {
-		if (page < 2) {
-			return this.dates[0]?.id ?? null;
-		}
-
-		const index = Math.floor((page - 2) / 2);
-		return this.dates[index]?.id ?? null;
-	}
-
-	private getTotalTurnPages(): number {
-		return this.dates.length * 2 + 1;
-	}
-
-	private getFirstTurnPage(): number {
-		return 2;
+	private getDateIdForPageFlipIndex(pageIndex: number): string | null {
+		// Each date has two pages (left + right), so divide by 2
+		const dateIndex = Math.floor(pageIndex / 2);
+		return this.dates[dateIndex]?.id ?? null;
 	}
 
 	private updateCalendarActiveState(overrideDateId?: string | null): void {
@@ -1454,7 +1350,7 @@ export class DiaryView extends ItemView {
 		}
 
 		if (this.shouldUsePageFlip()) {
-			this.turnToDate(nextDateId);
+			this.flipToDate(nextDateId);
 			return;
 		}
 
@@ -1463,21 +1359,7 @@ export class DiaryView extends ItemView {
 	}
 
 	private shouldUsePageFlip(): boolean {
-		return window.matchMedia(DESKTOP_BREAKPOINT_QUERY).matches && this.isTurnPluginAvailable();
-	}
-
-	private getTurnBook(): TurnBook | null {
-		if (!this.turnBookEl) {
-			return null;
-		}
-
-		const turnBook = $(this.turnBookEl) as Partial<TurnBook>;
-		return typeof turnBook.turn === "function" ? turnBook as TurnBook : null;
-	}
-
-	private isTurnPluginAvailable(): boolean {
-		const turnProbe = $(activeDocument.createElement("div")) as Partial<TurnBook>;
-		return typeof turnProbe.turn === "function";
+		return window.matchMedia(DESKTOP_BREAKPOINT_QUERY).matches;
 	}
 
 	private getDailyQuoteFrontmatterKey(): string {

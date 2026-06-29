@@ -892,7 +892,7 @@
 	font-style: normal;
 }
 
-.diary-turn-viewport {
+.diary-page-flip-viewport {
 	position: relative;
 	z-index: 20;
 	width: 100%;
@@ -901,7 +901,7 @@
 	user-select: none;
 }
 
-.diary-turn-viewport:active {
+.diary-page-flip-viewport:active {
 	cursor: grabbing;
 }
 
@@ -922,45 +922,20 @@
 	cursor: pointer;
 }
 
-.diary-turn-book,
-.diary-turn-book .turn-page-wrapper,
-.diary-turn-sheet {
+/* StPageFlip container */
+.diary-page-flip-book {
 	width: 100%;
 	height: 100%;
-}
-
-.diary-turn-book {
-	position: relative;
-	z-index: 2;
 	margin: 0 auto;
-	background: transparent;
 }
 
-.diary-turn-side-fill {
-	position: absolute;
-	inset: 0 auto 0 0;
-	z-index: 1;
-	width: 50%;
+/* StPageFlip wraps pages in .stf__item */
+.diary-page-flip-book .stf__item {
 	overflow: hidden;
-	pointer-events: none;
-	opacity: 0;
 }
 
-.diary-turn-side-fill.is-right {
-	inset: 0 0 0 auto;
-}
-
-.diary-turn-side-fill.is-visible {
-	opacity: 1;
-}
-
-.diary-turn-side-fill .diary-turn-sheet {
-	box-shadow: none;
-}
-
-.diary-turn-sheet {
-	min-width: 0;
-	min-height: 0;
+.diary-page-flip-sheet {
+	width: 100%;
 	height: 100%;
 	background: var(--diary-page);
 	box-shadow:
@@ -970,26 +945,15 @@
 	overflow: hidden;
 }
 
-.theme-dark .diary-turn-sheet {
+.theme-dark .diary-page-flip-sheet {
 	box-shadow:
 		inset 0 0 20px rgba(0, 0, 0, 0.7),
 		0 4px 12px rgba(0, 0, 0, 0.4),
 		2px 2px 4px rgba(0, 0, 0, 0.3);
 }
 
-.diary-turn-book .turn-page-wrapper {
-	background: transparent;
-}
-
-.diary-turn-sheet.is-left {
+.diary-page-flip-sheet.is-left {
 	border-right: 1px solid var(--diary-page-border);
-}
-
-.diary-turn-sheet.is-placeholder,
-.diary-turn-sheet.is-placeholder+.turn-page-wrapper {
-	background: transparent;
-	box-shadow: none;
-	border: 0;
 }
 
 
@@ -1170,7 +1134,7 @@
 	}
 
 	.diary-page-stack,
-	.diary-turn-viewport {
+	.diary-page-flip-viewport {
 		display: block;
 	}
 
@@ -1336,11 +1300,11 @@
 		overflow: visible;
 	}
 
-	.diary-pages-wrap.is-turn-book {
+	.diary-pages-wrap.is-page-flip {
 		padding: 0;
 	}
 
-	.diary-turn-viewport {
+	.diary-page-flip-viewport {
 		display: none;
 	}
 

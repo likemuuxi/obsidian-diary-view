@@ -24,8 +24,7 @@
 		"jiti": "2.6.1"
 	},
 	"dependencies": {
-		"jquery": "^1.12.0",
 		"obsidian": "latest",
-		"turn.js": "^1.0.5"
+		"page-flip": "^2.0.0"
 	}
 }
