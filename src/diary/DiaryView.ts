@@ -1,7 +1,11 @@
 import { App, ItemView, MarkdownRenderer, moment as obsidianMoment, normalizePath, Notice, requestUrl, setIcon, TFile, TFolder, WorkspaceLeaf ,Platform, FuzzySuggestModal} from "obsidian";
 import { PageFlip } from "page-flip";
-import type * as Moment from "moment";
 import type DiaryViewPlugin from "../main";
+
+// Derive moment types from the obsidian-bundled moment function instead of
+// importing the restricted 'moment' package directly.
+type Moment = ReturnType<typeof obsidianMoment>;
+type MomentInput = Parameters<typeof obsidianMoment>[0];
 import {
 	DEFAULT_DAILY_IMAGE_FRONTMATTER_KEY,
 	DEFAULT_DAILY_IMAGE_DESC_FRONTMATTER_KEY,
@@ -32,7 +36,7 @@ const AUTOSAVE_DELAY_MS = 1500;
 const DESKTOP_BREAKPOINT_QUERY = "(min-width: 960px)";
 const SWIPE_MIN_DISTANCE_PX = 90;
 const TURN_NATIVE_CORNER_SIZE_PX = 120;
-const moment = obsidianMoment as unknown as (input?: Moment.MomentInput) => Moment.Moment;
+const moment = obsidianMoment as unknown as (input?: MomentInput) => Moment;
 
 interface DiaryDateItem {
 	id: string;
@@ -308,8 +312,8 @@ export class DiaryView extends ItemView {
 		const pages = Array.from(this.pageFlipEl.children) as HTMLElement[];
 		pageFlip.loadFromHTML(pages);
 
-		pageFlip.on("flip", (e: { data: number }) => {
-			const pageIndex = e.data;
+		pageFlip.on("flip", (e) => {
+			const pageIndex = e.data as number;
 			const nextDateId = this.getDateIdForPageFlipIndex(pageIndex);
 			if (!nextDateId) {
 				return;
@@ -1312,7 +1316,7 @@ export class DiaryView extends ItemView {
 		ringEl.style.setProperty("--diary-mobile-ring-offset", `${offset}px`);
 
 		const ns = "http://www.w3.org/2000/svg";
-		const svg = activeDocument.createElementNS(ns, "svg") as SVGSVGElement;
+		const svg = activeDocument.createElementNS(ns, "svg");
 		svg.setAttribute("width", "40");
 		svg.setAttribute("height", "16");
 		svg.setAttribute("viewBox", "0 0 40 16");

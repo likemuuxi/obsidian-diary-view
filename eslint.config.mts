@@ -8,6 +8,9 @@ export default tseslint.config(
 		languageOptions: {
 			globals: {
 				...globals.browser,
+				// Obsidian-injected globals (active window/document per vault)
+				activeDocument: "readonly",
+				activeWindow: "readonly",
 			},
 			parserOptions: {
 				projectService: {

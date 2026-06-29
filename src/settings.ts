@@ -550,14 +550,14 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					},
 				}, (btnEl) => {
 					setIcon(btnEl, "rotate-ccw");
-					btnEl.addEventListener("click", async () => {
+					btnEl.addEventListener("click", () => void (async () => {
 						for (const option of this.plugin.settings.customFrontmatterPickers[index]!.options) {
 							delete option.color;
 						}
 						await this.plugin.saveSettings();
 						this.display();
 						await this.plugin.refreshAllDiaryViews();
-					});
+					})());
 				});
 
 				headerEl.createEl("button", {
@@ -569,14 +569,14 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					},
 				}, (btnEl) => {
 					setIcon(btnEl, "shuffle");
-					btnEl.addEventListener("click", async () => {
+					btnEl.addEventListener("click", () => void (async () => {
 						for (const option of this.plugin.settings.customFrontmatterPickers[index]!.options) {
 							option.color = randomHexColor();
 						}
 						await this.plugin.saveSettings();
 						this.display();
 						await this.plugin.refreshAllDiaryViews();
-					});
+					})());
 				});
 			}
 
@@ -643,13 +643,13 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 				},
 			}, (btnEl) => {
 				setIcon(btnEl, "trash-2");
-				btnEl.addEventListener("click", async () => {
+				btnEl.addEventListener("click", () => void (async () => {
 					this.plugin.settings.customFrontmatterPickers.splice(index, 1);
 					this.expandedPickerIds.delete(pickerId);
 					await this.plugin.saveSettings();
 					this.display();
 					await this.plugin.refreshAllDiaryViews();
-				});
+				})());
 			});
 
 			if (pickerType === "text") {
@@ -799,11 +799,11 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					type: "button",
 				},
 				text: t("settings.custom-picker.add-option", lang),
-			}).addEventListener("click", async () => {
-				this.plugin.settings.customFrontmatterPickers[index]!.options.push({ name: "", icon: "" });
-				await this.plugin.saveSettings();
-				this.display();
-			});
+		}).addEventListener("click", () => void (async () => {
+			this.plugin.settings.customFrontmatterPickers[index]!.options.push({ name: "", icon: "" });
+			await this.plugin.saveSettings();
+			this.display();
+		})());
 		}
 	}
 }
