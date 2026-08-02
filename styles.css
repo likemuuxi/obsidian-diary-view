@@ -2428,3 +2428,12 @@
 .diary-page-footer-label.is-clickable:hover {
 	color: var(--diary-blue);
 }
+
+/* ── Location / GPS ── */
+.diary-frontmatter-trigger .diary-frontmatter-icon[data-location] svg {
+	color: var(--diary-blue);
+}
+.diary-frontmatter-trigger.has-value .diary-frontmatter-text {
+	font-size: 11px;
+	letter-spacing: 0.01em;
+}
