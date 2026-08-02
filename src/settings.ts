@@ -68,6 +68,7 @@ export function detectLanguage(): Language {
 }
 
 export interface DiaryViewSettings {
+	dailyLocationFrontmatterKey: string;
 	dailyQuoteApiUrl: string;
 	dailyQuoteFrontmatterKey: string;
 	dailyImageFrontmatterKey: string;
@@ -262,6 +263,7 @@ export const DEFAULT_SETTINGS: DiaryViewSettings = {
 	dailyQuoteFrontmatterKey: "daily-quote",
 	dailyImageFrontmatterKey: "daily-image",
 	dailyImageDescFrontmatterKey: "daily-image-desc",
+	dailyLocationFrontmatterKey: "coordinates",
 	dailyNoteHeading: "",
 	language: defaultLanguage,
 	startOfWeek: 1,
@@ -428,6 +430,21 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 						this.plugin.settings.dailyImageDescFrontmatterKey = nextValue;
 						await this.plugin.saveSettings();
 					});
+
+		new Setting(containerEl)
+			.setName(t("settings.location-key.name", lang))
+			.setDesc(t("settings.location-key.desc", lang))
+			.addText((text) => {
+				text
+					.setPlaceholder(t("settings.location-key.placeholder", lang))
+					.setValue(this.plugin.settings.dailyLocationFrontmatterKey)
+					.onChange(async (value) => {
+						const nextValue = value.trim() || DEFAULT_SETTINGS.dailyLocationFrontmatterKey;
+						this.plugin.settings.dailyLocationFrontmatterKey = nextValue;
+						await this.plugin.saveSettings();
+						await this.plugin.refreshAllDiaryViews();
+					});
+			});
 			});
 
 		new Setting(containerEl)

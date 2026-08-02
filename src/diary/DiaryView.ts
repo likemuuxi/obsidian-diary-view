@@ -64,6 +64,7 @@ interface DiaryPageContent {
 	wordCount: number;
 	exists: boolean;
 	customFrontmatterValues: Record<string, string | null>;
+	location: string | null;
 }
 
 export class DiaryView extends ItemView {
@@ -603,6 +604,29 @@ export class DiaryView extends ItemView {
 			});
 		}
 
+		// ── Location / GPS ──
+		const locationKey = this.getDailyLocationFrontmatterKey();
+		const locationCoords = content.location;
+		const locationTriggerEl = moodScrollEl.createDiv({ cls: "diary-frontmatter-trigger" });
+		locationTriggerEl.dataset.filePath = content.filePath;
+		locationTriggerEl.dataset.pickerKey = locationKey;
+		if (locationCoords) {
+			locationTriggerEl.addClass("has-value");
+			const iconEl = locationTriggerEl.createDiv({ cls: "diary-frontmatter-icon" });
+			setIcon(iconEl, "map-pin");
+			locationTriggerEl.createSpan({ cls: "diary-frontmatter-text", text: locationCoords });
+			locationTriggerEl.addEventListener("click", (evt) => {
+				evt.stopPropagation();
+				void this.applyCustomFrontmatterChange(content.filePath, locationKey, null);
+			});
+		} else {
+			locationTriggerEl.createSpan({ cls: "diary-frontmatter-placeholder", text: t("location.placeholder", this.lang()) });
+			locationTriggerEl.addEventListener("click", (evt) => {
+				evt.stopPropagation();
+				this.getCurrentLocationAndWrite(content.filePath);
+			});
+		}
+
 		const calendarEl = pageEl.createDiv({ cls: "diary-calendar" });
 		const weekendDays = this.plugin.settings.weekendDays;
 		calendarDates.forEach((date) => {
@@ -1065,6 +1089,34 @@ export class DiaryView extends ItemView {
 		inputEl.select();
 	}
 
+	private getCurrentLocationAndWrite(filePath: string): void {
+		if (!navigator.geolocation) {
+			new Notice(t("location.gps-not-available", this.lang()));
+			return;
+		}
+
+		const notice = new Notice(t("location.gps-acquiring", this.lang()), 0);
+		navigator.geolocation.getCurrentPosition(
+			(position) => {
+				notice.hide();
+				const lat = Number(position.coords.latitude.toFixed(5));
+				const lng = Number(position.coords.longitude.toFixed(5));
+				const coordStr = `${lat}, ${lng}`;
+				const locationKey = this.getDailyLocationFrontmatterKey();
+				void this.applyCustomFrontmatterChange(filePath, locationKey, coordStr);
+				new Notice(`📍 ${coordStr}`);
+			},
+			(error) => {
+				notice.hide();
+				console.warn("Geolocation error:", error);
+				new Notice(t("location.gps-error", this.lang()) + error.message);
+			},
+			{ enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 },
+		);
+	}
+
+
+
 	private async applyCustomFrontmatterChange(filePath: string, key: string, value: string | null): Promise<void> {
 		let file = this.app.vault.getAbstractFileByPath(filePath);
 		if (!(file instanceof TFile)) {
@@ -1093,10 +1145,14 @@ export class DiaryView extends ItemView {
 		const cached = this.renderedContentByPath.get(filePath);
 		if (cached) {
 			cached.customFrontmatterValues[key] = value;
+			if (key === this.getDailyLocationFrontmatterKey()) {
+				cached.location = value;
+			}
 		}
 
 		this.markFileCreated(filePath);
 		this.updateCustomPickerDisplay(filePath);
+		this.updateLocationDisplay(filePath, key);
 	}
 
 	private updateCustomPickerDisplay(filePath: string): void {
@@ -1130,6 +1186,39 @@ export class DiaryView extends ItemView {
 			} else {
 				triggerEl.createSpan({ cls: "diary-frontmatter-placeholder", text: picker.label || key });
 			}
+		}
+	}
+
+	private updateLocationDisplay(filePath: string, key: string): void {
+		const locationKey = this.getDailyLocationFrontmatterKey();
+		if (key !== locationKey) return;
+
+		const cached = this.renderedContentByPath.get(filePath);
+		const triggers = Array.from(this.contentEl.querySelectorAll<HTMLElement>(`.diary-frontmatter-trigger[data-file-path="${CSS.escape(filePath)}"][data-picker-key="${CSS.escape(key)}"]`));
+		for (const triggerEl of triggers) {
+			const currentValue = cached?.location ?? null;
+			// Clone and replace to remove all old event listeners
+			const newTrigger = triggerEl.cloneNode(false) as HTMLElement;
+			newTrigger.classList.toggle("has-value", !!currentValue);
+			if (currentValue) {
+				const iconEl = newTrigger.createDiv({ cls: "diary-frontmatter-icon" });
+				setIcon(iconEl, "map-pin");
+				newTrigger.createSpan({ cls: "diary-frontmatter-text", text: currentValue });
+				newTrigger.addEventListener("click", (evt) => {
+					evt.stopPropagation();
+					void this.applyCustomFrontmatterChange(filePath, key, null);
+				});
+			} else {
+				newTrigger.createSpan({ cls: "diary-frontmatter-placeholder", text: t("location.placeholder", this.lang()) });
+				newTrigger.addEventListener("click", (evt) => {
+					evt.stopPropagation();
+					const c = this.renderedContentByPath.get(filePath);
+					if (c) {
+						this.getCurrentLocationAndWrite(c.filePath);
+					}
+				});
+			}
+			triggerEl.replaceWith(newTrigger);
 		}
 	}
 
@@ -1374,6 +1463,10 @@ export class DiaryView extends ItemView {
 		return this.plugin.settings.dailyImageDescFrontmatterKey?.trim() || DEFAULT_DAILY_IMAGE_DESC_FRONTMATTER_KEY;
 	}
 
+	private getDailyLocationFrontmatterKey(): string {
+		return this.plugin.settings.dailyLocationFrontmatterKey?.trim() || "coordinates";
+	}
+
 	private async openDailyNote(path: string): Promise<void> {
 		let file = this.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) {
@@ -1431,6 +1524,16 @@ export class DiaryView extends ItemView {
 			}
 		}
 
+
+		const locationKey = this.getDailyLocationFrontmatterKey();
+		let locationVal = readFrontmatterString(frontmatter, locationKey);
+		if (!locationVal) {
+			// Also check for the "coordinates" property in list format (Maps plugin)
+			const coords = frontmatter?.[locationKey];
+			if (Array.isArray(coords) && coords.length === 2) {
+				locationVal = `${coords[0]}, ${coords[1]}`;
+			}
+		}
 		return {
 			imageCaption,
 			artworkImage,
@@ -1444,6 +1547,7 @@ export class DiaryView extends ItemView {
 			wordCount,
 			exists: true,
 			customFrontmatterValues,
+			location: locationVal,
 		};
 	}
 
@@ -1474,6 +1578,7 @@ export class DiaryView extends ItemView {
 			wordCount: 0,
 			exists: false,
 			customFrontmatterValues: {},
+			location: null,
 		};
 	}
 
