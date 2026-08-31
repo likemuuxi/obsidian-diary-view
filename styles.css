@@ -4,7 +4,7 @@
 	--diary-stitch: #b8e2f8;
 	--diary-page: #ffffff;
 	--diary-page-border: #f1f5f9;
-	--diary-bg: #f9fafb;
+	--diary-bg: var(--background-primary);
 	--diary-text: #111827;
 	--diary-muted: #6b7280;
 	--diary-faint: #cbd5e1;

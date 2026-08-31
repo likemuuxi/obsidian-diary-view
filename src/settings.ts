@@ -277,6 +277,7 @@ export const DEFAULT_SETTINGS: DiaryViewSettings = {
 export class DiaryViewSettingTab extends PluginSettingTab {
 	plugin: DiaryViewPlugin;
 	private expandedPickerIds = new Set<string>();
+	private pickersContainerEl: HTMLElement | null = null;
 
 	constructor(app: App, plugin: DiaryViewPlugin) {
 		super(app, plugin);
@@ -461,7 +462,8 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 			text: t("settings.custom-picker.desc", lang),
 		});
 
-		this.renderCustomFrontmatterPickers(containerEl);
+		this.pickersContainerEl = containerEl.createDiv({ cls: "diary-settings-pickers-container" });
+		this.renderCustomFrontmatterPickers(this.pickersContainerEl);
 
 		new Setting(containerEl)
 			.setName(t("settings.custom-picker.add-btn", lang))
@@ -478,7 +480,7 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 							options: [],
 						});
 						await this.plugin.saveSettings();
-						this.display();
+						this.refreshPickersOnly();
 					});
 			});
 
@@ -491,10 +493,19 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					.onClick(async () => {
 						restoreBuiltinPickerOptions(this.plugin.settings, lang);
 						await this.plugin.saveSettings();
-						this.display();
+						this.refreshPickersOnly();
 						await this.plugin.refreshAllDiaryViews();
 					});
 			});
+	}
+
+	private refreshPickersOnly(): void {
+		if (!this.pickersContainerEl) {
+			this.display();
+			return;
+		}
+		this.pickersContainerEl.empty();
+		this.renderCustomFrontmatterPickers(this.pickersContainerEl);
 	}
 
 	private renderCustomFrontmatterPickers(containerEl: HTMLElement): void {
@@ -537,8 +548,16 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 				} else {
 					this.expandedPickerIds.add(pickerId);
 				}
-				this.display();
+				const nextExpanded = this.expandedPickerIds.has(pickerId);
+				cardEl.toggleClass("is-expanded", nextExpanded);
+				cardEl.toggleClass("is-collapsed", !nextExpanded);
+				bodyEl.toggleClass("is-hidden", !nextExpanded);
+				toggleEl.setAttr("aria-expanded", String(nextExpanded));
+				toggleEl.setAttr("title", t(nextExpanded ? "settings.custom-picker.collapse-tooltip" : "settings.custom-picker.expand-tooltip", lang));
 			});
+
+			const iconPreviews: HTMLElement[] = [];
+			const colorInputs: HTMLInputElement[] = [];
 
 			if (pickerType === "options") {
 				headerEl.createEl("button", {
@@ -551,11 +570,17 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 				}, (btnEl) => {
 					setIcon(btnEl, "rotate-ccw");
 					btnEl.addEventListener("click", () => void (async () => {
-						for (const option of this.plugin.settings.customFrontmatterPickers[index]!.options) {
-							delete option.color;
+						const options = this.plugin.settings.customFrontmatterPickers[index]!.options;
+						for (let k = 0; k < options.length; k++) {
+							delete options[k]!.color;
+							if (iconPreviews[k]) {
+								iconPreviews[k]!.style.color = "";
+							}
+							if (colorInputs[k]) {
+								colorInputs[k]!.value = "#9e9e9e";
+							}
 						}
 						await this.plugin.saveSettings();
-						this.display();
 						await this.plugin.refreshAllDiaryViews();
 					})());
 				});
@@ -570,11 +595,18 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 				}, (btnEl) => {
 					setIcon(btnEl, "shuffle");
 					btnEl.addEventListener("click", () => void (async () => {
-						for (const option of this.plugin.settings.customFrontmatterPickers[index]!.options) {
-							option.color = randomHexColor();
+						const options = this.plugin.settings.customFrontmatterPickers[index]!.options;
+						for (let k = 0; k < options.length; k++) {
+							const color = randomHexColor();
+							options[k]!.color = color;
+							if (iconPreviews[k]) {
+								iconPreviews[k]!.style.color = color;
+							}
+							if (colorInputs[k]) {
+								colorInputs[k]!.value = color;
+							}
 						}
 						await this.plugin.saveSettings();
-						this.display();
 						await this.plugin.refreshAllDiaryViews();
 					})());
 				});
@@ -628,7 +660,7 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 							.onChange(async (value) => {
 								this.plugin.settings.customFrontmatterPickers[index]!.type = value as CustomFrontmatterPickerType;
 								await this.plugin.saveSettings();
-								this.display();
+								this.refreshPickersOnly();
 								await this.plugin.refreshAllDiaryViews();
 							});
 					});
@@ -647,7 +679,7 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					this.plugin.settings.customFrontmatterPickers.splice(index, 1);
 					this.expandedPickerIds.delete(pickerId);
 					await this.plugin.saveSettings();
-					this.display();
+					this.refreshPickersOnly();
 					await this.plugin.refreshAllDiaryViews();
 				})());
 			});
@@ -672,6 +704,7 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 				if (opt.icon) {
 					setIcon(iconPreview, opt.icon);
 				}
+				iconPreviews.push(iconPreview);
 
 				const optFields = optSetting.controlEl.createDiv({ cls: "diary-settings-mood-fields" });
 				const iconInput = optFields.createEl("input", {
@@ -698,6 +731,7 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 					},
 				});
 				colorInput.value = (opt.color && /^#[0-9a-fA-F]{6}$/.test(opt.color)) ? opt.color : "#9e9e9e";
+				colorInputs.push(colorInput);
 
 				const colorActions = optFields.createDiv({ cls: "diary-settings-mood-color-actions" });
 				colorActions.appendChild(colorInput);
@@ -787,7 +821,7 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 						.onClick(async () => {
 							this.plugin.settings.customFrontmatterPickers[index]!.options.splice(optIndex, 1);
 							await this.plugin.saveSettings();
-							this.display();
+							this.refreshPickersOnly();
 							await this.plugin.refreshAllDiaryViews();
 						});
 				});
@@ -802,7 +836,7 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 		}).addEventListener("click", () => void (async () => {
 			this.plugin.settings.customFrontmatterPickers[index]!.options.push({ name: "", icon: "" });
 			await this.plugin.saveSettings();
-			this.display();
+			this.refreshPickersOnly();
 		})());
 		}
 	}
