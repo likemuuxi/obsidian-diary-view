@@ -574,7 +574,7 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 						for (let k = 0; k < options.length; k++) {
 							delete options[k]!.color;
 							if (iconPreviews[k]) {
-								iconPreviews[k]!.style.color = "";
+								iconPreviews[k]!.setCssProps({ color: "" });
 							}
 							if (colorInputs[k]) {
 								colorInputs[k]!.value = "#9e9e9e";
@@ -600,7 +600,7 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 							const color = randomHexColor();
 							options[k]!.color = color;
 							if (iconPreviews[k]) {
-								iconPreviews[k]!.style.color = color;
+								iconPreviews[k]!.setCssProps({ color });
 							}
 							if (colorInputs[k]) {
 								colorInputs[k]!.value = color;
@@ -699,7 +699,7 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 
 				const iconPreview = optSetting.controlEl.createDiv({ cls: "diary-settings-mood-preview" });
 				if (opt.color) {
-					iconPreview.style.color = opt.color;
+					iconPreview.setCssProps({ color: opt.color });
 				}
 				if (opt.icon) {
 					setIcon(iconPreview, opt.icon);
@@ -756,7 +756,7 @@ export class DiaryViewSettingTab extends PluginSettingTab {
 
 				const updateOptPreview = (): void => {
 					iconPreview.empty();
-					iconPreview.style.color = opt.color || "";
+					iconPreview.setCssProps({ color: opt.color || "" });
 					if (iconInput.value.trim()) {
 						setIcon(iconPreview, iconInput.value.trim());
 					}
